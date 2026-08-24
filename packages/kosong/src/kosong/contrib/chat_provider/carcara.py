@@ -114,11 +114,16 @@ class CarcaraProvider:
                 if isinstance(part, ThinkPart):
                     reasoning += part.think
                 else:
-                    content_parts.append(part)
+                    # Converter ContentPart para dict serializável
+                    content_parts.append(part.model_dump(exclude_none=True))
             if reasoning and self._reasoning_key:
                 dumped[self._reasoning_key] = reasoning
             if content_parts:
-                dumped["content"] = content_parts
+                # Se só tem um TextPart, simplificar para string
+                if len(content_parts) == 1 and content_parts[0].get("type") == "text":
+                    dumped["content"] = content_parts[0].get("text", "")
+                else:
+                    dumped["content"] = content_parts
             messages.append(dumped)
 
         # Montar tools no formato OpenAI
