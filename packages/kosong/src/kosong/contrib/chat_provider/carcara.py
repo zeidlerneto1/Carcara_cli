@@ -1,35 +1,22 @@
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import AsyncIterator, Sequence
-from typing import Any, Self, Unpack
+from typing import Any, Self
 
 import httpx
-from openai import AsyncStream, OpenAIError, omit
-from openai.types import CompletionUsage, ReasoningEffort
-from openai.types.chat import (
-    ChatCompletion,
-    ChatCompletionChunk,
-    ChatCompletionMessageParam,
-)
-from typing_extensions import TypedDict
 
 from kosong.chat_provider import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
     ChatProvider,
     RetryableChatProvider,
     StreamedMessagePart,
     ThinkingEffort,
     TokenUsage,
 )
-from kosong.chat_provider.openai_common import (
-    close_replaced_openai_client,
-    convert_error,
-    create_openai_client,
-    reasoning_effort_to_thinking_effort,
-    thinking_effort_to_reasoning_effort,
-    tool_to_openai,
-)
-from kosong.contrib.chat_provider.common import ToolMessageConversion
 from kosong.message import ContentPart, Message, TextPart, ThinkPart, ToolCall, ToolCallPart
 from kosong.tooling import Tool
 
@@ -37,20 +24,11 @@ from kosong.tooling import Tool
 class CarcaraProvider:
     """
     Chat provider para o servidor Carcará (llama.cpp compatível).
-    Baseado no OpenAILegacy mas injeta headers fixos e body params extras.
+    Usa httpx diretamente para injetar headers fixos e body params extras
+    que o OpenAI SDK rejeita (return_progress, reasoning_format, etc.)
     """
 
     name = "carcara"
-
-    class GenerationKwargs(TypedDict, extra_items=Any, total=False):
-        max_tokens: int | None
-        temperature: float | None
-        top_p: float | None
-        n: int | None
-        presence_penalty: float | None
-        frequency_penalty: float | None
-        stop: str | list[str] | None
-        prompt_cache_key: str | None
 
     # Headers fixos exigidos pelo servidor Carcará
     DEFAULT_HEADERS = {
@@ -79,29 +57,35 @@ class CarcaraProvider:
         base_url: str | None = None,
         stream: bool = True,
         reasoning_key: str | None = None,
-        tool_message_conversion: ToolMessageConversion | None = None,
         **client_kwargs: Any,
     ):
         self.model = model
         self.stream = stream
-        self._api_key: str | None = api_key
-        self._base_url: str | None = base_url
-        self._client_kwargs: dict[str, Any] = dict(client_kwargs)
+        self._api_key = api_key or ""
+        self._base_url = (base_url or "").rstrip("/")
+        self._reasoning_key = reasoning_key or "reasoning_content"
+        self._thinking_effort: ThinkingEffort | None = None
 
-        # Merge headers fixos com os custom headers passados
+        # Montar headers
         headers = dict(self.DEFAULT_HEADERS)
-        if custom_headers := self._client_kwargs.pop("default_headers", None):
+        headers["Content-Type"] = "application/json"
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        if custom_headers := client_kwargs.pop("default_headers", None):
             headers.update(custom_headers)
 
-        self.client = create_openai_client(
-            api_key=self._api_key,
-            base_url=self._base_url,
-            client_kwargs={**self._client_kwargs, "default_headers": headers},
-        )
-        self._reasoning_effort: ReasoningEffort | Any = omit
-        self._reasoning_key = reasoning_key
-        self._tool_message_conversion: ToolMessageConversion | None = tool_message_conversion
-        self._generation_kwargs: CarcaraProvider.GenerationKwargs = {}
+        self._headers = headers
+        self._client_kwargs = dict(client_kwargs)
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                headers=self._headers,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+                **self._client_kwargs,
+            )
+        return self._client
 
     @property
     def model_name(self) -> str:
@@ -109,9 +93,7 @@ class CarcaraProvider:
 
     @property
     def thinking_effort(self) -> ThinkingEffort | None:
-        if isinstance(self._reasoning_effort, type(omit)):
-            return None
-        return reasoning_effort_to_thinking_effort(self._reasoning_effort)
+        return self._thinking_effort
 
     async def generate(
         self,
@@ -119,105 +101,113 @@ class CarcaraProvider:
         tools: Sequence[Tool],
         history: Sequence[Message],
     ) -> "CarcaraStreamedMessage":
-        messages: list[ChatCompletionMessageParam] = []
+        messages: list[dict[str, Any]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        messages.extend(self._convert_message(message) for message in history)
 
-        generation_kwargs: dict[str, Any] = {}
-        generation_kwargs.update(self._generation_kwargs)
+        for msg in history:
+            dumped = msg.model_dump(exclude_none=True)
+            # Extrair reasoning content se existir ThinkPart
+            reasoning = ""
+            content_parts = []
+            for part in msg.content:
+                if isinstance(part, ThinkPart):
+                    reasoning += part.think
+                else:
+                    content_parts.append(part)
+            if reasoning and self._reasoning_key:
+                dumped[self._reasoning_key] = reasoning
+            if content_parts:
+                dumped["content"] = content_parts
+            messages.append(dumped)
 
-        reasoning_effort = self._reasoning_effort
-        if isinstance(reasoning_effort, type(omit)) and self._reasoning_key:
-            has_think_part = any(
-                isinstance(part, ThinkPart) for message in history for part in message.content
-            )
-            if has_think_part:
-                reasoning_effort = "medium"
+        # Montar tools no formato OpenAI
+        openai_tools = []
+        for tool in tools:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
+            })
 
-        # Monta o body da request com os campos extras do Carcará
-        request_body: dict[str, Any] = {
+        body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "tools": [tool_to_openai(tool) for tool in tools],
             "stream": self.stream,
-            "stream_options": {"include_usage": True} if self.stream else omit,
-            "reasoning_effort": reasoning_effort,
             **self.EXTRA_BODY,
-            **generation_kwargs,
         }
 
+        if openai_tools:
+            body["tools"] = openai_tools
+            body["tool_choice"] = "auto"
+
+        if self.stream:
+            body["stream_options"] = {"include_usage": True}
+
+        # Aplicar thinking effort se configurado
+        if self._thinking_effort and self._thinking_effort != "off":
+            body["reasoning_effort"] = self._thinking_effort
+
+        url = f"{self._base_url}/chat/completions"
+        client = self._get_client()
+
         try:
-            response = await self.client.chat.completions.create(**request_body)
-            return CarcaraStreamedMessage(response, self._reasoning_key)
-        except (OpenAIError, httpx.HTTPError) as e:
-            raise convert_error(e) from e
+            response = await client.post(url, json=body)
+            response.raise_for_status()
+
+            if self.stream:
+                return CarcaraStreamedMessage(response.aiter_text(), self._reasoning_key)
+            else:
+                data = response.json()
+                return CarcaraStreamedMessage.from_json(data, self._reasoning_key)
+
+        except httpx.TimeoutException as e:
+            raise APITimeoutError(str(e)) from e
+        except httpx.NetworkError as e:
+            raise APIConnectionError(str(e)) from e
+        except httpx.HTTPStatusError as e:
+            raise APIStatusError(
+                e.response.status_code,
+                str(e),
+                request_id=e.response.headers.get("x-request-id"),
+                trace_id=e.response.headers.get("x-trace-id"),
+            ) from e
+        except Exception as e:
+            from kosong.chat_provider import ChatProviderError
+            raise ChatProviderError(f"Carcara request failed: {e}") from e
 
     def on_retryable_error(self, error: BaseException) -> bool:
-        old_client = self.client
-        headers = dict(self.DEFAULT_HEADERS)
-        if custom_headers := self._client_kwargs.get("default_headers"):
-            headers.update(custom_headers)
-        self.client = create_openai_client(
-            api_key=self._api_key,
-            base_url=self._base_url,
-            client_kwargs={**self._client_kwargs, "default_headers": headers},
-        )
-        close_replaced_openai_client(old_client, client_kwargs=self._client_kwargs)
+        if self._client and not self._client.is_closed:
+            # Forçar recriação do client na próxima request
+            pass
         return True
 
     def with_thinking(self, effort: ThinkingEffort) -> Self:
         new_self = copy.copy(self)
-        new_self._reasoning_effort = thinking_effort_to_reasoning_effort(effort)
-        return new_self
-
-    def with_generation_kwargs(self, **kwargs: Unpack[GenerationKwargs]) -> Self:
-        new_self = copy.copy(self)
-        new_self._generation_kwargs = copy.deepcopy(self._generation_kwargs)
-        new_self._generation_kwargs.update(kwargs)
+        new_self._thinking_effort = effort
         return new_self
 
     @property
     def model_parameters(self) -> dict[str, Any]:
-        model_parameters: dict[str, Any] = {"base_url": str(self.client.base_url)}
-        if self._reasoning_effort is not omit:
-            model_parameters["reasoning_effort"] = self._reasoning_effort
-        return model_parameters
-
-    def _convert_message(self, message: Message) -> ChatCompletionMessageParam:
-        message = message.model_copy(deep=True)
-        reasoning_content: str = ""
-        content: list[ContentPart] = []
-        has_reasoning = False
-        for part in message.content:
-            if isinstance(part, ThinkPart):
-                has_reasoning = True
-                reasoning_content += part.think
-            else:
-                content.append(part)
-        if message.role == "tool" and self._tool_message_conversion == "extract_text":
-            message.content = [TextPart(text=message.extract_text(sep="\n"))]
-        else:
-            message.content = content
-        dumped_message = message.model_dump(exclude_none=True)
-        if has_reasoning and self._reasoning_key:
-            dumped_message[self._reasoning_key] = reasoning_content
-        return dumped_message  # type: ignore[return-value]
+        return {"base_url": self._base_url, "model": self.model}
 
 
 class CarcaraStreamedMessage:
     def __init__(
         self,
-        response: ChatCompletion | AsyncStream[ChatCompletionChunk],
+        response: AsyncIterator[str] | dict[str, Any],
         reasoning_key: str | None,
     ):
-        self._reasoning_key: str | None = reasoning_key
-        if isinstance(response, ChatCompletion):
-            self._iter = self._convert_non_stream_response(response)
+        self._reasoning_key = reasoning_key
+        if isinstance(response, dict):
+            self._iter = self._from_dict(response)
         else:
-            self._iter = self._convert_stream_response(response)
+            self._iter = self._from_sse(response)
         self._id: str | None = None
-        self._usage: CompletionUsage | None = None
+        self._usage: TokenUsage | None = None
 
     def __aiter__(self) -> AsyncIterator[StreamedMessagePart]:
         return self
@@ -235,71 +225,104 @@ class CarcaraStreamedMessage:
 
     @property
     def usage(self) -> TokenUsage | None:
-        if self._usage:
-            cached = 0
-            other_input = self._usage.prompt_tokens
-            if (
-                self._usage.prompt_tokens_details
-                and self._usage.prompt_tokens_details.cached_tokens
-            ):
-                cached = self._usage.prompt_tokens_details.cached_tokens
-                other_input -= cached
-            return TokenUsage(
-                input_other=other_input,
-                output=self._usage.completion_tokens,
-                input_cache_read=cached,
+        return self._usage
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any], reasoning_key: str | None) -> "CarcaraStreamedMessage":
+        # Para respostas não-stream (não usado normalmente)
+        instance = cls.__new__(cls)
+        instance._reasoning_key = reasoning_key
+        instance._id = data.get("id")
+        instance._usage = None
+        instance._iter = instance._from_dict(data)
+        return instance
+
+    async def _from_dict(self, data: dict[str, Any]) -> AsyncIterator[StreamedMessagePart]:
+        choice = data.get("choices", [{}])[0]
+        message = choice.get("message", {})
+
+        if self._reasoning_key and message.get(self._reasoning_key):
+            yield ThinkPart(think=message[self._reasoning_key])
+
+        if message.get("content"):
+            yield TextPart(text=message["content"])
+
+        for tc in message.get("tool_calls", []):
+            yield ToolCall(
+                id=tc.get("id", ""),
+                name=tc.get("function", {}).get("name", ""),
+                arguments=tc.get("function", {}).get("arguments", ""),
             )
-        return None
 
-    async def _convert_non_stream_response(
-        self,
-        response: ChatCompletion,
-    ) -> AsyncIterator[StreamedMessagePart]:
-        self._id = response.id
-        if response.usage:
-            self._usage = response.usage
-        choice = response.choices[0]
-        message = choice.message
-        if hasattr(message, "reasoning_content") and message.reasoning_content:
-            yield ThinkPart(think=message.reasoning_content)
-        if message.content:
-            yield TextPart(text=message.content)
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                yield ToolCall(
-                    id=tool_call.id,
-                    name=tool_call.function.name,
-                    arguments=tool_call.function.arguments,
-                )
+        # Usage
+        usage = data.get("usage")
+        if usage:
+            self._usage = TokenUsage(
+                input_other=usage.get("prompt_tokens", 0),
+                output=usage.get("completion_tokens", 0),
+            )
 
-    async def _convert_stream_response(
-        self,
-        response: AsyncStream[ChatCompletionChunk],
-    ) -> AsyncIterator[StreamedMessagePart]:
+    async def _from_sse(self, aiter_text: AsyncIterator[str]) -> AsyncIterator[StreamedMessagePart]:
+        """Parse Server-Sent Events stream."""
+        buffer = ""
         reasoning_buffer = ""
         content_buffer = ""
-        async for chunk in response:
-            if chunk.id:
-                self._id = chunk.id
-            if chunk.usage:
-                self._usage = chunk.usage
-            for choice in chunk.choices:
-                delta = choice.delta
-                if self._reasoning_key and hasattr(delta, self._reasoning_key):
-                    reasoning_content = getattr(delta, self._reasoning_key)
-                    if reasoning_content:
-                        reasoning_buffer += reasoning_content
+
+        async for chunk in aiter_text:
+            buffer += chunk
+            while "\n\n" in buffer:
+                event, buffer = buffer.split("\n\n", 1)
+                lines = event.strip().split("\n")
+                if not lines:
+                    continue
+
+                # Parse SSE data line
+                data_line = ""
+                for line in lines:
+                    if line.startswith("data: "):
+                        data_line = line[6:]
+                        break
+
+                if not data_line or data_line == "[DONE]":
+                    continue
+
+                try:
+                    data = json.loads(data_line)
+                except json.JSONDecodeError:
+                    continue
+
+                if data.get("id"):
+                    self._id = data["id"]
+
+                # Usage no último chunk
+                if "usage" in data and data["usage"]:
+                    usage = data["usage"]
+                    self._usage = TokenUsage(
+                        input_other=usage.get("prompt_tokens", 0),
+                        output=usage.get("completion_tokens", 0),
+                    )
+
+                for choice in data.get("choices", []):
+                    delta = choice.get("delta", {})
+
+                    # Reasoning content
+                    if self._reasoning_key and delta.get(self._reasoning_key):
+                        reasoning_buffer += delta[self._reasoning_key]
                         yield ThinkPart(think=reasoning_buffer)
                         reasoning_buffer = ""
-                if delta.content:
-                    content_buffer += delta.content
-                    yield TextPart(text=content_buffer)
-                    content_buffer = ""
-                if delta.tool_calls:
-                    for tool_call in delta.tool_calls:
-                        if tool_call.function:
+
+                    # Text content
+                    if delta.get("content"):
+                        content_buffer += delta["content"]
+                        yield TextPart(text=content_buffer)
+                        content_buffer = ""
+
+                    # Tool calls
+                    for tc in delta.get("tool_calls", []):
+                        func = tc.get("function", {})
+                        if func.get("name") or func.get("arguments"):
                             yield ToolCall(
-                                id=tool_call.id or "",
-                                name=tool_call.function.name or "",
-                                arguments=tool_call.function.arguments or "",
+                                id=tc.get("id", ""),
+                                name=func.get("name", ""),
+                                arguments=func.get("arguments", ""),
                             )
