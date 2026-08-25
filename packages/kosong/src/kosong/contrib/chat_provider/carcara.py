@@ -31,7 +31,6 @@ class CarcaraProvider:
 
     name = "carcara"
 
-    # Headers fixos exigidos pelo servidor Carcará
     DEFAULT_HEADERS = {
         "Accept": "*/*",
         "Accept-Language": "en-US,en;q=0.9,pt;q=0.8",
@@ -40,7 +39,6 @@ class CarcaraProvider:
         "Origin": "https://carcara.sinapad.lncc.br",
     }
 
-    # Body params extras fixos do Carcará
     EXTRA_BODY = {
         "return_progress": True,
         "reasoning_format": "auto",
@@ -49,7 +47,6 @@ class CarcaraProvider:
         "timings_per_token": True,
     }
 
-    # Tools do LNCC (MCP) — só enviadas se CARCARA_LNCC_TOOLS=true
     LNCC_TOOLS = [
         {
             "type": "function",
@@ -98,14 +95,12 @@ class CarcaraProvider:
         },
     ]
 
-    # Mapeamento thinking_effort -> thinking_budget_tokens
     THINKING_BUDGET_MAP = {
         "low": 512,
         "medium": 2048,
         "high": 8192,
     }
 
-    # Sampling params aceitos pelo servidor (env var -> campo)
     SAMPLING_ENV_MAP = {
         "CARCARA_TEMPERATURE": ("temperature", float),
         "CARCARA_DYNATEMP_RANGE": ("dynatemp_range", float),
@@ -136,7 +131,6 @@ class CarcaraProvider:
         self._reasoning_key = reasoning_key or "reasoning_content"
         self._thinking_effort: ThinkingEffort | None = None
 
-        # Montar headers
         headers = dict(self.DEFAULT_HEADERS)
         headers["Content-Type"] = "application/json"
         if self._api_key:
@@ -148,7 +142,6 @@ class CarcaraProvider:
         self._client_kwargs = dict(client_kwargs)
         self._client: httpx.AsyncClient | None = None
 
-        # Coletar sampling params de env vars
         self._sampling_params: dict[str, Any] = {}
         for env_name, (field_name, converter) in self.SAMPLING_ENV_MAP.items():
             raw = os.getenv(env_name)
@@ -203,14 +196,9 @@ class CarcaraProvider:
                     dumped["content"] = content_parts
             messages.append(dumped)
 
-        # Montar tools: nativas do kimi-cli + LNCC (se ativado)
         all_tools: list[dict[str, Any]] = []
-
-        # LNCC tools só se CARCARA_LNCC_TOOLS=true
         if os.getenv("CARCARA_LNCC_TOOLS", "").lower() in ("1", "true", "yes", "on"):
             all_tools.extend(self.LNCC_TOOLS)
-
-        # Tools nativas do kimi-cli
         for tool in tools:
             all_tools.append({
                 "type": "function",
@@ -221,23 +209,18 @@ class CarcaraProvider:
                 },
             })
 
-        # Montar body
         body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "stream": self.stream,
             **self.EXTRA_BODY,
         }
-
-        # Merge sampling params (env vars override defaults)
         body.update(self._sampling_params)
 
-        # Thinking / reasoning control
         if self._thinking_effort and self._thinking_effort != "off":
             body["chat_template_kwargs"] = {"enable_thinking": True}
             if self._thinking_effort in self.THINKING_BUDGET_MAP:
                 body["thinking_budget_tokens"] = self.THINKING_BUDGET_MAP[self._thinking_effort]
-            # "max" não envia thinking_budget_tokens (ilimitado)
         else:
             body["chat_template_kwargs"] = {"enable_thinking": False}
 
@@ -409,13 +392,28 @@ class CarcaraStreamedMessage:
                         yield TextPart(text=content_buffer)
                         content_buffer = ""
 
+                    # Tool calls: emitir ToolCall (com name) ou ToolCallPart (só arguments)
                     for tc in delta.get("tool_calls", []):
                         func = tc.get("function", {})
-                        if func.get("name") or func.get("arguments"):
+                        if not func:
+                            continue
+
+                        tc_id = tc.get("id", "")
+                        tc_name = func.get("name")
+                        tc_args = func.get("arguments")
+
+                        if tc_name:
+                            # Início de uma tool call: emitir ToolCall completo
                             yield ToolCall(
-                                id=tc.get("id", ""),
+                                id=tc_id or "",
                                 function=ToolCall.FunctionBody(
-                                    name=func.get("name", ""),
-                                    arguments=func.get("arguments", ""),
+                                    name=tc_name,
+                                    arguments=tc_args or "",
                                 ),
                             )
+                        elif tc_args:
+                            # Continuação: emitir ToolCallPart (só arguments)
+                            yield ToolCallPart(arguments_part=tc_args)
+                        else:
+                            # skip empty
+                            pass
