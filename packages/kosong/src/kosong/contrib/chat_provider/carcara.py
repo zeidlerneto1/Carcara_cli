@@ -49,7 +49,7 @@ class CarcaraProvider:
         "timings_per_token": True,
     }
 
-    # Tools do LNCC (MCP) — sempre enviadas junto com as nativas
+    # Tools do LNCC (MCP) — só enviadas se CARCARA_LNCC_TOOLS=true
     LNCC_TOOLS = [
         {
             "type": "function",
@@ -203,8 +203,14 @@ class CarcaraProvider:
                     dumped["content"] = content_parts
             messages.append(dumped)
 
-        # Montar tools: nativas do kimi-cli + LNCC
-        all_tools: list[dict[str, Any]] = list(self.LNCC_TOOLS)
+        # Montar tools: nativas do kimi-cli + LNCC (se ativado)
+        all_tools: list[dict[str, Any]] = []
+
+        # LNCC tools só se CARCARA_LNCC_TOOLS=true
+        if os.getenv("CARCARA_LNCC_TOOLS", "").lower() in ("1", "true", "yes", "on"):
+            all_tools.extend(self.LNCC_TOOLS)
+
+        # Tools nativas do kimi-cli
         for tool in tools:
             all_tools.append({
                 "type": "function",
@@ -337,10 +343,13 @@ class CarcaraStreamedMessage:
             yield TextPart(text=message["content"])
 
         for tc in message.get("tool_calls", []):
+            func = tc.get("function", {})
             yield ToolCall(
                 id=tc.get("id", ""),
-                name=tc.get("function", {}).get("name", ""),
-                arguments=tc.get("function", {}).get("arguments", ""),
+                function=ToolCall.FunctionBody(
+                    name=func.get("name", ""),
+                    arguments=func.get("arguments", ""),
+                ),
             )
 
         usage = data.get("usage")
@@ -405,6 +414,8 @@ class CarcaraStreamedMessage:
                         if func.get("name") or func.get("arguments"):
                             yield ToolCall(
                                 id=tc.get("id", ""),
-                                name=func.get("name", ""),
-                                arguments=func.get("arguments", ""),
+                                function=ToolCall.FunctionBody(
+                                    name=func.get("name", ""),
+                                    arguments=func.get("arguments", ""),
+                                ),
                             )
