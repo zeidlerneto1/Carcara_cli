@@ -26,8 +26,7 @@ class CarcaraProvider:
     """
     Chat provider para o servidor Carcará (llama.cpp compatível).
     Usa httpx diretamente para injetar headers fixos e body params extras.
-    Suporta todos os sampling params do llama.cpp: temperature, top_k, top_p,
-    min_p, xtc, dynatemp, typ_p, backend_sampling, etc.
+    Suporta thinking_budget_tokens, sampling params e tools do LNCC + nativas.
     """
 
     name = "carcara"
@@ -45,17 +44,72 @@ class CarcaraProvider:
     EXTRA_BODY = {
         "return_progress": True,
         "reasoning_format": "auto",
-        "chat_template_kwargs": {"enable_thinking": False},
         "reasoning_control": True,
         "backend_sampling": False,
         "timings_per_token": True,
     }
 
-    # Sampling params aceitos pelo servidor (mapeados de env var -> nome do campo)
+    # Tools do LNCC (MCP) — sempre enviadas junto com as nativas
+    LNCC_TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_environment",
+                "description": "Retorna o contexto de execução: que você (o modelo) está rodando no supercomputador Santos Dumont (SDumont) do LNCC, com as características do ambiente. Chame quando precisar saber/declarar ONDE está sendo executado ou quais recursos de HPC estão disponíveis.",
+                "parameters": {"type": "object", "properties": {}, "title": "get_environmentArguments"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_skills",
+                "description": "Lista as skills (áreas de conhecimento de domínio) disponíveis no MCP do LNCC, com uma breve descrição de cada. Use antes de `get_skill` para descobrir qual área consultar.",
+                "parameters": {"type": "object", "properties": {}, "title": "list_skillsArguments"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_skill",
+                "description": "Retorna o conhecimento completo (boas práticas, comandos, referências) de uma skill de domínio do LNCC. Use para fundamentar respostas técnicas. area: slug da skill (ex.: 'numerical-methods', 'programming', 'bioinformatics', 'molecular-modeling', 'hpc-sdumont'). Veja `list_skills`.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"area": {"title": "Area", "type": "string"}},
+                    "required": ["area"],
+                    "title": "get_skillArguments",
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "ask_expert",
+                "description": "Consulta um 'especialista' de uma área de domínio do LNCC sobre uma pergunta. HOJE (modo conhecimento): use para obter respostas técnicas aprofundadas de especialistas nas áreas do LNCC.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "area": {"title": "Area", "type": "string"},
+                        "question": {"title": "Question", "type": "string"},
+                    },
+                    "required": ["area", "question"],
+                    "title": "ask_expertArguments",
+                },
+            },
+        },
+    ]
+
+    # Mapeamento thinking_effort -> thinking_budget_tokens
+    THINKING_BUDGET_MAP = {
+        "low": 512,
+        "medium": 2048,
+        "high": 8192,
+    }
+
+    # Sampling params aceitos pelo servidor (env var -> campo)
     SAMPLING_ENV_MAP = {
         "CARCARA_TEMPERATURE": ("temperature", float),
         "CARCARA_DYNATEMP_RANGE": ("dynatemp_range", float),
-        "CARCARA_DYNATEXPONENT": ("dynatemp_exponent", float),
+        "CARCARA_DYNATEMP_EXPONENT": ("dynatemp_exponent", float),
         "CARCARA_TOP_K": ("top_k", int),
         "CARCARA_TOP_P": ("top_p", float),
         "CARCARA_MIN_P": ("min_p", float),
@@ -149,9 +203,10 @@ class CarcaraProvider:
                     dumped["content"] = content_parts
             messages.append(dumped)
 
-        openai_tools = []
+        # Montar tools: nativas do kimi-cli + LNCC
+        all_tools: list[dict[str, Any]] = list(self.LNCC_TOOLS)
         for tool in tools:
-            openai_tools.append({
+            all_tools.append({
                 "type": "function",
                 "function": {
                     "name": tool.name,
@@ -160,6 +215,7 @@ class CarcaraProvider:
                 },
             })
 
+        # Montar body
         body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -170,15 +226,21 @@ class CarcaraProvider:
         # Merge sampling params (env vars override defaults)
         body.update(self._sampling_params)
 
-        if openai_tools:
-            body["tools"] = openai_tools
+        # Thinking / reasoning control
+        if self._thinking_effort and self._thinking_effort != "off":
+            body["chat_template_kwargs"] = {"enable_thinking": True}
+            if self._thinking_effort in self.THINKING_BUDGET_MAP:
+                body["thinking_budget_tokens"] = self.THINKING_BUDGET_MAP[self._thinking_effort]
+            # "max" não envia thinking_budget_tokens (ilimitado)
+        else:
+            body["chat_template_kwargs"] = {"enable_thinking": False}
+
+        if all_tools:
+            body["tools"] = all_tools
             body["tool_choice"] = "auto"
 
         if self.stream:
             body["stream_options"] = {"include_usage": True}
-
-        if self._thinking_effort and self._thinking_effort != "off":
-            body["reasoning_effort"] = self._thinking_effort
 
         url = f"{self._base_url}/chat/completions"
         client = self._get_client()
