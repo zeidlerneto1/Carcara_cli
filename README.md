@@ -1,177 +1,329 @@
-# Kimi CLI
+# Carcará CLI
 
-[![Commit Activity](https://img.shields.io/github/commit-activity/w/MoonshotAI/kimi-cli)](https://github.com/MoonshotAI/kimi-cli/graphs/commit-activity)
-[![Checks](https://img.shields.io/github/check-runs/MoonshotAI/kimi-cli/main)](https://github.com/MoonshotAI/kimi-cli/actions)
-[![Version](https://img.shields.io/pypi/v/kimi-cli)](https://pypi.org/project/kimi-cli/)
-[![Downloads](https://img.shields.io/pypi/dw/kimi-cli)](https://pypistats.org/packages/kimi-cli)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/MoonshotAI/kimi-cli)
+Carcará CLI é um agente de IA para terminal, adaptado do [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) para funcionar com o servidor **Carcará** do LNCC (Laboratório Nacional de Computação Científica), rodando sobre o supercomputador **Santos Dumont**.
 
-[Kimi Code](https://www.kimi.com/code/) | [Documentation](https://moonshotai.github.io/kimi-cli/en/) | [文档](https://moonshotai.github.io/kimi-cli/zh/)
+## O que é o Carcará
 
-> [!IMPORTANT]
-> **Kimi CLI is evolving into [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)** — the next-generation terminal AI agent from the same team. Installing Kimi Code CLI automatically migrates your configuration and sessions. This project will be gradually wound down; the docs and existing installations remain available.
+O **Carcará** é o serviço de LLM open-source do LNCC, servido via `llama.cpp` em nós GPU do supercomputador Santos Dumont (SINAPAD). O Carcará CLI conecta-se diretamente a este servidor, permitindo que você use modelos como o **DeepSeek-v4-Flash-0731** e **Qwen3.8-27B** diretamente do terminal.
 
-Kimi CLI is an AI agent that runs in the terminal, helping you complete software development tasks and terminal operations. It can read and edit code, execute shell commands, search and fetch web pages, and autonomously plan and adjust actions during execution.
+## Recursos
 
-## Getting Started
+- 🧠 **Chat interativo** no terminal com streaming em tempo real
+- 🔧 **Modo Agente** — executa comandos de shell, lê/edita arquivos, busca na web
+- 🛠️ **Tool calling nativo** — `shell`, `read_file`, `write_file`, `grep`, `fetch_url`, etc.
+- ⚡ **Controle fino de sampling** — temperature, top_k, top_p, min_p, XTC, backend sampling
+- 🎯 **Thinking modes** — off, low, medium, high, max (com `thinking_budget_tokens`)
+- 🌐 **Suporte a tools do LNCC** — `get_environment`, `list_skills`, `get_skill`, `ask_expert`
 
-See [Getting Started](https://moonshotai.github.io/kimi-cli/en/guides/getting-started.html) for how to install and start using Kimi CLI.
+---
 
-## Key Features
+## Instalação
 
-### Shell command mode
+### Pré-requisitos
 
-Kimi CLI is not only a coding agent, but also a shell. You can switch the shell command mode by pressing `Ctrl-X`. In this mode, you can directly run shell commands without leaving Kimi CLI.
+- **Git** — para clonar o repositório
+- **Python 3.12+** — o projeto usa Python moderno
+- **uv** — package manager (instalado automaticamente nos passos abaixo)
 
-![](./docs/media/shell-mode.gif)
+---
 
-> [!NOTE]
-> Built-in shell commands like `cd` are not supported yet.
+### Windows
 
-### VS Code extension
+#### Passo 1: Instalar `uv`
 
-Kimi CLI can be integrated with [Visual Studio Code](https://code.visualstudio.com/) via the [Kimi Code VS Code Extension](https://marketplace.visualstudio.com/items?itemName=moonshot-ai.kimi-code).
+Abra o **PowerShell como Administrador** e execute:
 
-![VS Code Extension](./docs/media/vscode.png)
-
-### IDE integration via ACP
-
-Kimi CLI supports [Agent Client Protocol] out of the box. You can use it together with any ACP-compatible editor or IDE.
-
-[Agent Client Protocol]: https://github.com/agentclientprotocol/agent-client-protocol
-
-To use Kimi CLI with ACP clients, make sure to run Kimi CLI in the terminal and send `/login` to complete the login first. Then, you can configure your ACP client to start Kimi CLI as an ACP agent server with command `kimi acp`.
-
-For example, to use Kimi CLI with [Zed](https://zed.dev/) or [JetBrains](https://blog.jetbrains.com/ai/2025/12/bring-your-own-ai-agent-to-jetbrains-ides/), add the following configuration to your `~/.config/zed/settings.json` or `~/.jetbrains/acp.json` file:
-
-```json
-{
-  "agent_servers": {
-    "Kimi CLI": {
-      "type": "custom",
-      "command": "kimi",
-      "args": ["acp"],
-      "env": {}
-    }
-  }
-}
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-Then you can create Kimi CLI threads in IDE's agent panel.
+Feche e reabra o PowerShell. Teste:
 
-![](./docs/media/acp-integration.gif)
-
-### Zsh integration
-
-You can use Kimi CLI together with Zsh, to empower your shell experience with AI agent capabilities.
-
-Install the [zsh-kimi-cli](https://github.com/MoonshotAI/zsh-kimi-cli) plugin via:
-
-```sh
-git clone https://github.com/MoonshotAI/zsh-kimi-cli.git \
-  ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/kimi-cli
+```powershell
+uv --version
 ```
 
-> [!NOTE]
-> If you are using a plugin manager other than Oh My Zsh, you may need to refer to the plugin's README for installation instructions.
+#### Passo 2: Clonar o repositório
 
-Then add `kimi-cli` to your Zsh plugin list in `~/.zshrc`:
-
-```sh
-plugins=(... kimi-cli)
+```powershell
+git clone https://github.com/zeidlerneto1/Carcara_cli.git
+cd Carcara_cli
 ```
 
-After restarting Zsh, you can switch to agent mode by pressing `Ctrl-X`.
+#### Passo 3: Instalar dependências
 
-### MCP support
-
-Kimi CLI supports MCP (Model Context Protocol) tools.
-
-**`kimi mcp` sub-command group**
-
-You can manage MCP servers with `kimi mcp` sub-command group. For example:
-
-```sh
-# Add streamable HTTP server:
-kimi mcp add --transport http context7 https://mcp.context7.com/mcp --header "CONTEXT7_API_KEY: ctx7sk-your-key"
-
-# Add streamable HTTP server with OAuth authorization:
-kimi mcp add --transport http --auth oauth linear https://mcp.linear.app/mcp
-
-# Add stdio server:
-kimi mcp add --transport stdio chrome-devtools -- npx chrome-devtools-mcp@latest
-
-# List added MCP servers:
-kimi mcp list
-
-# Remove an MCP server:
-kimi mcp remove chrome-devtools
-
-# Authorize an MCP server:
-kimi mcp auth linear
+```powershell
+uv sync --all-extras --all-packages
 ```
 
-**Ad-hoc MCP configuration**
+Isso instala todos os pacotes do workspace (`kosong`, `kimi-code`, `kimi-cli`) + dependências.
 
-Kimi CLI also supports ad-hoc MCP server configuration via CLI option.
+#### Passo 4: Configurar
 
-Given an MCP config file in the well-known MCP config format like the following:
+Crie o arquivo de configuração:
 
-```json
-{
-  "mcpServers": {
-    "context7": {
-      "url": "https://mcp.context7.com/mcp",
-      "headers": {
-        "CONTEXT7_API_KEY": "YOUR_API_KEY"
-      }
-    },
-    "chrome-devtools": {
-      "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest"]
-    }
-  }
-}
+```powershell
+mkdir "$env:USERPROFILE\.kimi"
 ```
 
-Run `kimi` with `--mcp-config-file` option to connect to the specified MCP servers:
+Crie o arquivo `config.toml` **sem BOM** (use o Notepad e salve como UTF-8, ou execute o comando abaixo):
 
-```sh
-kimi --mcp-config-file /path/to/mcp.json
+```powershell
+$path = "$env:USERPROFILE\.kimi\config.toml"
+$bytes = [System.Text.Encoding]::UTF8.GetBytes(@'
+default_model = "carcara/deepseek"
+
+[providers.carcara]
+type = "carcara"
+base_url = "https://carcara.sinapad.lncc.br/service/v1"
+api_key = ""
+
+[models."carcara/deepseek"]
+provider = "carcara"
+model = "DeepSeek-v4-Flash-0731"
+max_context_size = 131072
+capabilities = ["thinking"]
+'@)
+[System.IO.File]::WriteAllBytes($path, $bytes)
 ```
 
-### More
+#### Passo 5: Testar
 
-See more features in the [Documentation](https://moonshotai.github.io/kimi-cli/en/).
-
-## Development
-
-To develop Kimi CLI, run:
-
-```sh
-git clone https://github.com/MoonshotAI/kimi-cli.git
-cd kimi-cli
-
-make prepare  # prepare the development environment
+```powershell
+uv run kimi -p "teste de conexão com o carcará"
 ```
 
-Then you can start working on Kimi CLI.
+Para entrar no modo interativo:
 
-Refer to the following commands after you make changes:
-
-```sh
-uv run kimi  # run Kimi CLI
-
-make format  # format code
-make check  # run linting and type checking
-make test  # run tests
-make test-kimi-cli  # run Kimi CLI tests only
-make test-kosong  # run kosong tests only
-make test-pykaos  # run pykaos tests only
-make build-web  # build the web UI and sync it into the package (requires Node.js/npm)
-make build  # build python packages
-make build-bin  # build standalone binary
-make help  # show all make targets
+```powershell
+uv run kimi
 ```
 
-Note: `make build` and `make build-bin` automatically run `make build-web` to embed the web UI.
+---
+
+### Linux
+
+#### Passo 1: Instalar `uv`
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Recarregue o shell:
+
+```bash
+source $HOME/.local/bin/env  # ou reinicie o terminal
+uv --version
+```
+
+#### Passo 2: Clonar o repositório
+
+```bash
+git clone https://github.com/zeidlerneto1/Carcara_cli.git
+cd Carcara_cli
+```
+
+#### Passo 3: Instalar dependências
+
+```bash
+uv sync --all-extras --all-packages
+```
+
+#### Passo 4: Configurar
+
+```bash
+mkdir -p ~/.kimi
+cat > ~/.kimi/config.toml << 'EOF'
+default_model = "carcara/deepseek"
+
+[providers.carcara]
+type = "carcara"
+base_url = "https://carcara.sinapad.lncc.br/service/v1"
+api_key = ""
+
+[models."carcara/deepseek"]
+provider = "carcara"
+model = "DeepSeek-v4-Flash-0731"
+max_context_size = 131072
+capabilities = ["thinking"]
+EOF
+```
+
+#### Passo 5: Testar
+
+```bash
+uv run kimi -p "teste de conexão com o carcará"
+```
+
+Para entrar no modo interativo:
+
+```bash
+uv run kimi
+```
+
+---
+
+## Uso
+
+### Modos de operação
+
+```bash
+# Chat interativo
+uv run kimi
+
+# Comando único
+uv run kimi -p "explique este código"
+
+# Modo Agente (auto-aprovação)
+uv run kimi --yolo -p "refatore o projeto para usar asyncio"
+
+# Modo Plano
+uv run kimi --plan -p "adicione autenticação JWT"
+
+# Background
+uv run kimi --background -p "faça um relatório dos commits"
+
+# Print (output puro, sem TUI)
+uv run kimi --print -p "gera um Dockerfile" > Dockerfile
+```
+
+### Thinking modes
+
+```bash
+# Off (padrão)
+uv run kimi -p "resposta direta"
+
+# Low thinking (512 tokens)
+uv run kimi --thinking low -p "pense um pouco"
+
+# Medium (2048 tokens)
+uv run kimi --thinking medium -p "análise profunda"
+
+# High (8192 tokens)
+uv run kimi --thinking high -p "problema complexo"
+
+# Max (ilimitado)
+uv run kimi --thinking max -p "vá o mais fundo possível"
+```
+
+### Sampling params (via env vars)
+
+```bash
+export CARCARA_TEMPERATURE=0.7
+export CARCARA_TOP_K=40
+export CARCARA_TOP_P=0.95
+export CARCARA_MIN_P=0.05
+export CARCARA_BACKEND_SAMPLING=true
+
+uv run kimi -p "teste com sampling customizado"
+```
+
+| Env Var | Tipo | Descrição |
+|---------|------|-----------|
+| `CARCARA_TEMPERATURE` | float | Criatividade (0 = determinístico, >1 = aleatório) |
+| `CARCARA_DYNATEMP_RANGE` | float | Variação dinâmica de temp |
+| `CARCARA_DYNATEMP_EXPONENT` | float | Expoente do dynatemp |
+| `CARCARA_TOP_K` | int | Mantém apenas K tokens mais prováveis |
+| `CARCARA_TOP_P` | float | Nucleus sampling (0.0–1.0) |
+| `CARCARA_MIN_P` | float | Prob mínima relativa ao token top |
+| `CARCARA_XTC_PROBABILITY` | float | Chance de ativar XTC sampler |
+| `CARCARA_XTC_THRESHOLD` | float | Threshold do XTC |
+| `CARCARA_TYP_P` | float | Typical sampling p |
+| `CARCARA_BACKEND_SAMPLING` | bool | `true` = samplers na GPU |
+
+### Tools do LNCC (MCP)
+
+Por padrão, as tools do MCP do LNCC estão **desativadas**. Para ativar:
+
+```bash
+# Linux
+export CARCARA_LNCC_TOOLS=true
+
+# Windows (PowerShell)
+$env:CARCARA_LNCC_TOOLS = "true"
+
+uv run kimi -p "liste as skills disponíveis no LNCC"
+```
+
+Com isso ativado, o modelo pode usar:
+- `get_environment` — contexto do SDumont
+- `list_skills` — lista skills do domínio LNCC
+- `get_skill` — pega conhecimento de uma skill
+- `ask_expert` — consulta especialista
+
+---
+
+## Múltiplos modelos
+
+Você pode cadastrar vários modelos no `config.toml`:
+
+```toml
+default_model = "carcara/deepseek"
+
+[providers.carcara]
+type = "carcara"
+base_url = "https://carcara.sinapad.lncc.br/service/v1"
+api_key = ""
+
+[models."carcara/deepseek"]
+provider = "carcara"
+model = "DeepSeek-v4-Flash-0731"
+max_context_size = 131072
+capabilities = ["thinking"]
+
+[models."carcara/qwen"]
+provider = "carcara"
+model = "Qwen3.8-27B"
+max_context_size = 32768
+capabilities = ["thinking"]
+```
+
+Trocar durante a sessão:
+
+```bash
+uv run kimi /model carcara/qwen
+```
+
+---
+
+## Solução de problemas
+
+### Erro: `Empty key at line 1 col 0`
+
+O arquivo `config.toml` foi salvo com BOM. Recrie sem BOM:
+
+**Windows:**
+```powershell
+$path = "$env:USERPROFILE\.kimi\config.toml"
+$bytes = [System.Text.Encoding]::UTF8.GetBytes((Get-Content $path -Raw))
+[System.IO.File]::WriteAllBytes($path, $bytes)
+```
+
+**Linux:**
+```bash
+sed -i "1s/^\xEF\xBB\xBF//" ~/.kimi/config.toml
+```
+
+### Erro: `503 Service Unavailable`
+
+O servidor Carcará está sobrecarregado ou em manutenção. Aguarde alguns segundos e tente novamente.
+
+### Erro: `cannot access local variable chat_provider`
+
+O `llm.py` não reconhece o provider `carcara`. Atualize o repositório:
+
+```bash
+git pull origin main
+```
+
+---
+
+## Créditos
+
+- Base: [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) — Moonshot AI
+- Servidor: [Carcará](https://carcara.sinapad.lncc.br) — LNCC / SINAPAD / Santos Dumont
+- Modelo: [DeepSeek-V4-Flash-0731](https://huggingface.co/deepseek-ai) — DeepSeek AI / Unsloth
+
+## Licença
+
+MIT License — veja [LICENSE](LICENSE) para detalhes.
