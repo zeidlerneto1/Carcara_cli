@@ -47,6 +47,7 @@ class CarcaraProvider:
         "reasoning_format": "auto",
         "chat_template_kwargs": {"enable_thinking": False},
         "reasoning_control": True,
+        "backend_sampling": False,
         "timings_per_token": True,
     }
 
@@ -54,7 +55,7 @@ class CarcaraProvider:
     SAMPLING_ENV_MAP = {
         "CARCARA_TEMPERATURE": ("temperature", float),
         "CARCARA_DYNATEMP_RANGE": ("dynatemp_range", float),
-        "CARCARA_DYNATEMP_EXPONENT": ("dynatemp_exponent", float),
+        "CARCARA_DYNATEXPONENT": ("dynatemp_exponent", float),
         "CARCARA_TOP_K": ("top_k", int),
         "CARCARA_TOP_P": ("top_p", float),
         "CARCARA_MIN_P": ("min_p", float),
