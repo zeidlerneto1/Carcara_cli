@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from collections.abc import AsyncIterator, Sequence
 from typing import Any, Self
 
@@ -24,8 +25,9 @@ from kosong.tooling import Tool
 class CarcaraProvider:
     """
     Chat provider para o servidor Carcará (llama.cpp compatível).
-    Usa httpx diretamente para injetar headers fixos e body params extras
-    que o OpenAI SDK rejeita (return_progress, reasoning_format, etc.)
+    Usa httpx diretamente para injetar headers fixos e body params extras.
+    Suporta todos os sampling params do llama.cpp: temperature, top_k, top_p,
+    min_p, xtc, dynatemp, typ_p, backend_sampling, etc.
     """
 
     name = "carcara"
@@ -39,14 +41,27 @@ class CarcaraProvider:
         "Origin": "https://carcara.sinapad.lncc.br",
     }
 
-    # Body params extras exigidos pelo servidor Carcará
+    # Body params extras fixos do Carcará
     EXTRA_BODY = {
         "return_progress": True,
         "reasoning_format": "auto",
         "chat_template_kwargs": {"enable_thinking": False},
         "reasoning_control": True,
-        "backend_sampling": False,
         "timings_per_token": True,
+    }
+
+    # Sampling params aceitos pelo servidor (mapeados de env var -> nome do campo)
+    SAMPLING_ENV_MAP = {
+        "CARCARA_TEMPERATURE": ("temperature", float),
+        "CARCARA_DYNATEMP_RANGE": ("dynatemp_range", float),
+        "CARCARA_DYNATEMP_EXPONENT": ("dynatemp_exponent", float),
+        "CARCARA_TOP_K": ("top_k", int),
+        "CARCARA_TOP_P": ("top_p", float),
+        "CARCARA_MIN_P": ("min_p", float),
+        "CARCARA_XTC_PROBABILITY": ("xtc_probability", float),
+        "CARCARA_XTC_THRESHOLD": ("xtc_threshold", float),
+        "CARCARA_TYP_P": ("typ_p", float),
+        "CARCARA_BACKEND_SAMPLING": ("backend_sampling", lambda v: v.lower() in ("1", "true", "yes", "on")),
     }
 
     def __init__(
@@ -78,6 +93,16 @@ class CarcaraProvider:
         self._client_kwargs = dict(client_kwargs)
         self._client: httpx.AsyncClient | None = None
 
+        # Coletar sampling params de env vars
+        self._sampling_params: dict[str, Any] = {}
+        for env_name, (field_name, converter) in self.SAMPLING_ENV_MAP.items():
+            raw = os.getenv(env_name)
+            if raw is not None:
+                try:
+                    self._sampling_params[field_name] = converter(raw)
+                except Exception:
+                    pass
+
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
@@ -107,26 +132,22 @@ class CarcaraProvider:
 
         for msg in history:
             dumped = msg.model_dump(exclude_none=True)
-            # Extrair reasoning content se existir ThinkPart
             reasoning = ""
             content_parts = []
             for part in msg.content:
                 if isinstance(part, ThinkPart):
                     reasoning += part.think
                 else:
-                    # Converter ContentPart para dict serializável
                     content_parts.append(part.model_dump(exclude_none=True))
             if reasoning and self._reasoning_key:
                 dumped[self._reasoning_key] = reasoning
             if content_parts:
-                # Se só tem um TextPart, simplificar para string
                 if len(content_parts) == 1 and content_parts[0].get("type") == "text":
                     dumped["content"] = content_parts[0].get("text", "")
                 else:
                     dumped["content"] = content_parts
             messages.append(dumped)
 
-        # Montar tools no formato OpenAI
         openai_tools = []
         for tool in tools:
             openai_tools.append({
@@ -145,6 +166,9 @@ class CarcaraProvider:
             **self.EXTRA_BODY,
         }
 
+        # Merge sampling params (env vars override defaults)
+        body.update(self._sampling_params)
+
         if openai_tools:
             body["tools"] = openai_tools
             body["tool_choice"] = "auto"
@@ -152,7 +176,6 @@ class CarcaraProvider:
         if self.stream:
             body["stream_options"] = {"include_usage": True}
 
-        # Aplicar thinking effort se configurado
         if self._thinking_effort and self._thinking_effort != "off":
             body["reasoning_effort"] = self._thinking_effort
 
@@ -185,9 +208,6 @@ class CarcaraProvider:
             raise ChatProviderError(f"Carcara request failed: {e}") from e
 
     def on_retryable_error(self, error: BaseException) -> bool:
-        if self._client and not self._client.is_closed:
-            # Forçar recriação do client na próxima request
-            pass
         return True
 
     def with_thinking(self, effort: ThinkingEffort) -> Self:
@@ -197,7 +217,9 @@ class CarcaraProvider:
 
     @property
     def model_parameters(self) -> dict[str, Any]:
-        return {"base_url": self._base_url, "model": self.model}
+        params: dict[str, Any] = {"base_url": self._base_url, "model": self.model}
+        params.update(self._sampling_params)
+        return params
 
 
 class CarcaraStreamedMessage:
@@ -234,7 +256,6 @@ class CarcaraStreamedMessage:
 
     @classmethod
     def from_json(cls, data: dict[str, Any], reasoning_key: str | None) -> "CarcaraStreamedMessage":
-        # Para respostas não-stream (não usado normalmente)
         instance = cls.__new__(cls)
         instance._reasoning_key = reasoning_key
         instance._id = data.get("id")
@@ -259,7 +280,6 @@ class CarcaraStreamedMessage:
                 arguments=tc.get("function", {}).get("arguments", ""),
             )
 
-        # Usage
         usage = data.get("usage")
         if usage:
             self._usage = TokenUsage(
@@ -268,7 +288,6 @@ class CarcaraStreamedMessage:
             )
 
     async def _from_sse(self, aiter_text: AsyncIterator[str]) -> AsyncIterator[StreamedMessagePart]:
-        """Parse Server-Sent Events stream."""
         buffer = ""
         reasoning_buffer = ""
         content_buffer = ""
@@ -281,7 +300,6 @@ class CarcaraStreamedMessage:
                 if not lines:
                     continue
 
-                # Parse SSE data line
                 data_line = ""
                 for line in lines:
                     if line.startswith("data: "):
@@ -299,7 +317,6 @@ class CarcaraStreamedMessage:
                 if data.get("id"):
                     self._id = data["id"]
 
-                # Usage no último chunk
                 if "usage" in data and data["usage"]:
                     usage = data["usage"]
                     self._usage = TokenUsage(
@@ -310,19 +327,16 @@ class CarcaraStreamedMessage:
                 for choice in data.get("choices", []):
                     delta = choice.get("delta", {})
 
-                    # Reasoning content
                     if self._reasoning_key and delta.get(self._reasoning_key):
                         reasoning_buffer += delta[self._reasoning_key]
                         yield ThinkPart(think=reasoning_buffer)
                         reasoning_buffer = ""
 
-                    # Text content
                     if delta.get("content"):
                         content_buffer += delta["content"]
                         yield TextPart(text=content_buffer)
                         content_buffer = ""
 
-                    # Tool calls
                     for tc in delta.get("tool_calls", []):
                         func = tc.get("function", {})
                         if func.get("name") or func.get("arguments"):
