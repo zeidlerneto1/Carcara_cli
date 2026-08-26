@@ -91,10 +91,11 @@ def _write_original_stderr(text: str) -> None:
 
 
 async def _refresh_managed_models_silent(config: Config) -> None:
-    from kimi_cli.auth.platforms import refresh_managed_models
+    from kimi_cli.auth.platforms import refresh_carcara_models, refresh_managed_models
 
     try:
         await refresh_managed_models(config)
+        await refresh_carcara_models(config)
     except Exception as exc:
         logger.warning("Background managed-model refresh failed: {error}", error=exc)
 

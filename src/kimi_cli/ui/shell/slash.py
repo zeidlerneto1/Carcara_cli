@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Any, cast
 from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 
 from kimi_cli import logger
-from kimi_cli.auth.platforms import get_platform_name_for_provider, refresh_managed_models
+from kimi_cli.auth.platforms import (
+    get_platform_name_for_provider,
+    refresh_carcara_models,
+    refresh_managed_models,
+)
 from kimi_cli.cli import Reload, SwitchToVis, SwitchToWeb
 from kimi_cli.config import load_config, save_config
 from kimi_cli.exception import ConfigError
@@ -192,6 +196,7 @@ async def model(app: Shell, args: str):
     config = soul.runtime.config
 
     await refresh_managed_models(config)
+    await refresh_carcara_models(config)
 
     if not config.models:
         console.print('[yellow]No models configured, send "/login" to login.[/yellow]')
