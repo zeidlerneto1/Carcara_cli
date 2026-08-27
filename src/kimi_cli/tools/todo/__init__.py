@@ -1,9 +1,10 @@
+import contextlib
 import json
 from pathlib import Path
 from typing import Any, Literal, cast, override
 
 from kosong.tooling import CallableTool2, ToolReturnValue
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from kimi_cli.session_state import TodoItemState
 from kimi_cli.soul.agent import Runtime
@@ -25,6 +26,26 @@ class Params(BaseModel):
             "If not provided, returns the current todo list without making changes."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_string_todos(cls, data: Any) -> Any:
+        """Coerce a JSON-string-encoded ``todos`` into a real list.
+
+        Some tool-call runtimes pass nested arguments double-encoded (a JSON
+        string instead of a parsed list). Accept that form so the tool keeps
+        working regardless of how the caller serializes the argument.
+        """
+        if not isinstance(data, dict):
+            return data
+        raw = cast(dict[str, Any], data)
+        todos_value = raw.get("todos")
+        if isinstance(todos_value, str):
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
+                parsed = json.loads(todos_value)
+                if isinstance(parsed, list):
+                    return {**raw, "todos": cast(list[dict[str, Any]], parsed)}
+        return raw
 
 
 class SetTodoList(CallableTool2[Params]):

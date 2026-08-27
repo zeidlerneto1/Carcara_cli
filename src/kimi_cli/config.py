@@ -288,6 +288,37 @@ def get_default_config() -> Config:
     )
 
 
+def get_carcara_default_config() -> Config:
+    """Build a working default config for the Carcará provider.
+
+    Used to auto-provision a usable ``config.toml`` on first startup so the
+    user does not have to create it manually.
+    """
+    return Config(
+        default_model="carcara/deepseek",
+        providers={
+            "carcara": LLMProvider(
+                type="carcara",
+                base_url="https://carcara.sinapad.lncc.br/service/v1",
+                api_key=SecretStr(""),
+            )
+        },
+        models={
+            "carcara/deepseek": LLMModel(
+                provider="carcara",
+                model="DeepSeek-v4-Flash-0731",
+                max_context_size=131072,
+                capabilities={"thinking"},
+            )
+        },
+    )
+
+
+def _is_unconfigured(config: Config) -> bool:
+    """Return True when no model/provider is configured at all."""
+    return not config.default_model and not config.models and not config.providers
+
+
 def load_config(config_file: Path | None = None) -> Config:
     """
     Load configuration from config file.
@@ -314,8 +345,16 @@ def load_config(config_file: Path | None = None) -> Config:
         _migrate_json_config_to_toml()
 
     if not config_file.exists():
-        config = get_default_config()
-        logger.debug("No config file found, creating default config: {config}", config=config)
+        if is_default_config_file:
+            # Auto-provision a usable Carcará config on first startup.
+            config = get_carcara_default_config()
+            logger.info(
+                "No config file found, writing Carcará default config: {file}",
+                file=config_file,
+            )
+        else:
+            config = get_default_config()
+            logger.debug("No config file found, creating default config: {config}", config=config)
         save_config(config, config_file)
         config.is_from_default_location = is_default_config_file
         config.source_file = config_file
@@ -334,6 +373,14 @@ def load_config(config_file: Path | None = None) -> Config:
         raise ConfigError(f"Invalid TOML in configuration file {config_file}: {e}") from e
     except ValidationError as e:
         raise ConfigError(f"Invalid configuration file {config_file}: {e}") from e
+    # Auto-heal an existing but unconfigured default config (e.g. an empty file
+    # or one with no model/provider) so the CLI works out of the box with Carcará.
+    # Explicit --config-file paths and configs with an existing model are left alone.
+    if is_default_config_file and _is_unconfigured(config):
+        logger.info("Config has no model configured; writing Carcará default config.")
+        config = get_carcara_default_config()
+        save_config(config, config_file)
+
     config.is_from_default_location = is_default_config_file
     config.source_file = config_file
     return config

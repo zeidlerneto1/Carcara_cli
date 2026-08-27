@@ -5,6 +5,7 @@ from inline_snapshot import snapshot
 
 from kimi_cli.config import (
     Config,
+    get_carcara_default_config,
     get_default_config,
     load_config,
     load_config_from_string,
@@ -142,3 +143,48 @@ def test_load_config_compaction_trigger_ratio_too_low():
 def test_load_config_compaction_trigger_ratio_too_high():
     with pytest.raises(ConfigError, match="compaction_trigger_ratio"):
         load_config_from_string('{"loop_control": {"compaction_trigger_ratio": 1.0}}')
+
+
+def test_load_config_auto_provisions_carcara_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
+    config = load_config()
+    assert config.default_model == "carcara/deepseek"
+    assert "carcara" in config.providers
+    assert config.providers["carcara"].type == "carcara"
+    assert "carcara/deepseek" in config.models
+    assert (tmp_path / "config.toml").exists()
+
+
+def test_load_config_empty_file_auto_heals_carcara(monkeypatch, tmp_path):
+    monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
+    (tmp_path / "config.toml").write_text("", encoding="utf-8")
+    config = load_config()
+    assert config.default_model == "carcara/deepseek"
+    assert "carcara" in config.providers
+
+
+def test_load_config_existing_model_not_touched(monkeypatch, tmp_path):
+    monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'default_model = "foo"\n'
+        '[providers.foo]\ntype = "openai_legacy"\nbase_url = "http://x"\napi_key = "k"\n'
+        '[models.foo]\nprovider = "foo"\nmodel = "m"\nmax_context_size = 4096\n',
+        encoding="utf-8",
+    )
+    config = load_config()
+    assert config.default_model == "foo"
+    assert "carcara" not in config.providers
+
+
+def test_load_config_explicit_file_keeps_empty(tmp_path):
+    config = load_config(tmp_path / "custom.toml")
+    assert config.default_model == ""
+    assert config.models == {}
+
+
+def test_carcara_default_config_roundtrips():
+    config = get_carcara_default_config()
+    assert config.default_model == "carcara/deepseek"
+    reloaded = Config.model_validate(config.model_dump(mode="json", exclude_none=True))
+    assert reloaded.default_model == "carcara/deepseek"
+    assert "carcara" in reloaded.providers
