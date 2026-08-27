@@ -274,3 +274,64 @@ async def test_carcara_tool_message_serialization():
             {"role": "tool", "content": "5", "tool_call_id": "call_abc123"},
             {"role": "user", "content": "And 3+3?"},
         ]
+
+
+async def test_carcara_mid_history_think_only_with_tool_calls_drops_content():
+    """Regression: a NON-tail think-only assistant message must not carry a `think` part in content.
+
+    This reproduces the 400 ``unsupported content[].type`` seen on the Carcara
+    server. When an assistant message contains only a ThinkPart AND a tool call
+    (the model answered with reasoning, then emitted a tool call), the previous
+    serialization produced::
+
+        {"role": "assistant", "content": [{"type": "think", "think": "..."}],
+         "reasoning_content": "...", "tool_calls": [...]}
+
+    The ``content`` list still held the think part because the code only rebuilt
+    ``content`` when there were NON-think parts; the original dump (with the
+    think part) was left untouched. The server rejects any ``content[].type``
+    other than text with ``400 unsupported content[].type``.
+
+    After the fix the think-only content is dropped, leaving
+    ``{"role": "assistant", "reasoning_content": "...", "tool_calls": [...]}``.
+    """
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(
+            return_value=Response(200, json=make_chat_completion_response())
+        )
+        provider = CarcaraProvider(model="m", base_url=BASE_URL, stream=False)
+        history = [
+            Message(role="user", content="Do something"),
+            Message(
+                role="assistant",
+                content=[ThinkPart(think="Let me think hard...")],
+                tool_calls=[
+                    ToolCall(
+                        id="call_mid",
+                        function=ToolCall.FunctionBody(name="Shell", arguments="{}"),
+                    )
+                ],
+            ),
+            Message(role="tool", content="done", tool_call_id="call_mid"),
+            Message(role="user", content="Continue"),
+        ]
+        async for _ in await provider.generate("", [], history):
+            pass
+        body = json.loads(mock.calls.last.request.content.decode())
+        messages = body["messages"]
+        assert messages == [
+            {"role": "user", "content": "Do something"},
+            {
+                "role": "assistant",
+                "reasoning_content": "Let me think hard...",
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "id": "call_mid",
+                        "function": {"name": "Shell", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "content": "done", "tool_call_id": "call_mid"},
+            {"role": "user", "content": "Continue"},
+        ], f"server-400 repro: unexpected serialization: {messages!r}"

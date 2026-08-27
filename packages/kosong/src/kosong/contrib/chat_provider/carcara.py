@@ -200,6 +200,14 @@ class CarcaraProvider:
                     dumped["content"] = content_parts[0].get("text", "")
                 else:
                     dumped["content"] = content_parts
+            elif "content" in dumped and isinstance(dumped.get("content"), list):
+                # The original content was entirely thinking parts, which we have
+                # moved into ``reasoning_content``. Drop the leftover ``content``
+                # list (e.g. ``[{"type": "think", ...}]``) because servers reject
+                # ``unsupported content[].type`` for think parts inside content.
+                # For a think-only assistant message with tool calls this leaves
+                # ``{role: assistant, reasoning_content, tool_calls}`` which is valid.
+                dumped.pop("content", None)
             messages.append(dumped)
 
         last = messages[-1]
