@@ -168,16 +168,22 @@ class CarcaraProvider:
     def thinking_effort(self) -> ThinkingEffort | None:
         return self._thinking_effort
 
-    async def generate(
-        self,
-        system_prompt: str,
-        tools: Sequence[Tool],
-        history: Sequence[Message],
-    ) -> "CarcaraStreamedMessage":
-        messages: list[dict[str, Any]] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+    def _serialize_history(self, history: Sequence[Message]) -> list[dict[str, Any]]:
+        """Convert kosong messages into wire dicts, repairing invalid tails.
 
+        A message that ends with an assistant entry carrying no visible content
+        and no tool calls (e.g. a think-only response from an interrupted
+        stream) is rejected by servers that enforce
+        ``Last message must be from user or tool.``  For such tails we promote
+        the reasoning text into ``content`` so the request stays valid and the
+        reasoning is not lost.
+
+        This is the wire-layer defense. The CLI's soul layer applies
+        ``sanitize_history`` (see ``kimi_cli.soul.dynamic_injection``) before
+        calling the provider, so the two are intentionally redundant: this
+        guard protects any caller of ``CarcaraProvider``, not just the CLI.
+        """
+        messages: list[dict[str, Any]] = []
         for msg in history:
             dumped = msg.model_dump(exclude_none=True)
             reasoning = ""
@@ -195,6 +201,52 @@ class CarcaraProvider:
                 else:
                     dumped["content"] = content_parts
             messages.append(dumped)
+
+        last = messages[-1]
+        if not self._is_valid_tail(last):
+            if last.get("role") == "assistant":
+                reasoning = last.pop(self._reasoning_key, None) if self._reasoning_key else None
+                if reasoning:
+                    last["content"] = reasoning
+                else:
+                    last["content"] = ""
+            elif last.get("content") in (None, ""):
+                last["content"] = ""
+        return messages
+
+    @staticmethod
+    def _is_valid_tail(entry: dict[str, Any]) -> bool:
+        """Whether this message can legally end a chat-completions request.
+
+        Servers that enforce ``Last message must be from user or tool.`` reject
+        a request whose tail is an assistant message with no visible content
+        and no tool calls (a think-only response has its reasoning extracted
+        into ``reasoning_content``, leaving ``content=None``).
+        """
+        role = entry.get("role")
+        if role in ("user", "tool", "system"):
+            return True
+        content = entry.get("content")
+        if content is None:
+            return bool(entry.get("tool_calls"))
+        if isinstance(content, str):
+            return bool(content) or bool(entry.get("tool_calls"))
+        if isinstance(content, list):
+            return (
+                any(not (isinstance(p, dict) and p.get("type") == "think") for p in content)
+                or bool(entry.get("tool_calls"))
+            )
+        return True
+
+    async def generate(
+        self,
+        system_prompt: str,
+        tools: Sequence[Tool],
+        history: Sequence[Message],
+    ) -> CarcaraStreamedMessage:
+        messages: list[dict[str, Any]] = self._serialize_history(history)
+        if system_prompt:
+            messages = [{"role": "system", "content": system_prompt}] + messages
 
         all_tools: list[dict[str, Any]] = []
         if os.getenv("CARCARA_LNCC_TOOLS", "").lower() in ("1", "true", "yes", "on"):

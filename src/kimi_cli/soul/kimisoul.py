@@ -72,6 +72,7 @@ from kimi_cli.soul.dynamic_injection import (
     DynamicInjection,
     DynamicInjectionProvider,
     normalize_history,
+    sanitize_history,
 )
 from kimi_cli.soul.dynamic_injections.afk_mode import AfkModeInjectionProvider
 from kimi_cli.soul.dynamic_injections.plan_mode import PlanModeInjectionProvider
@@ -1179,7 +1180,7 @@ class KimiSoul:
         # ═══════════════════════════════════════════════════════════════════════
         # 2e.3. HISTORY NORMALIZATION
         # ═══════════════════════════════════════════════════════════════════════
-        effective_history = normalize_history(self._context.history)
+        effective_history = sanitize_history(normalize_history(self._context.history))
         generation_overrides = self._compute_completion_overrides(
             chat_provider,
             system_prompt=self._agent.system_prompt,

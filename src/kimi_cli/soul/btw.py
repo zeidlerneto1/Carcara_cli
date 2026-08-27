@@ -20,7 +20,7 @@ from kosong.tooling import Tool, ToolError, ToolResult
 
 from kimi_cli.llm import estimate_message_tokens, with_kimi_generation_overrides
 from kimi_cli.soul import LLMNotSet, wire_send
-from kimi_cli.soul.dynamic_injection import normalize_history
+from kimi_cli.soul.dynamic_injection import normalize_history, sanitize_history
 from kimi_cli.soul.message import system_reminder
 from kimi_cli.utils.logging import logger
 from kimi_cli.wire.types import BtwBegin, BtwEnd, TextPart
@@ -84,7 +84,7 @@ def _build_btw_context(soul: KimiSoul, question: str) -> tuple[str, list[Message
     as ``KimiSoul._step`` so the LLM provider can reuse the prompt cache.
     """
     system_prompt = soul._agent.system_prompt  # pyright: ignore[reportPrivateUsage]
-    effective_history = normalize_history(soul.context.history)
+    effective_history = sanitize_history(normalize_history(soul.context.history))
 
     wrapped = f"{system_reminder(SIDE_QUESTION_SYSTEM_REMINDER).text}\n\n{question}"
     side_message = Message(role="user", content=wrapped)

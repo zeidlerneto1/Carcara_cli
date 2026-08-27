@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from kosong.message import Message
+from kosong.message import Message, TextPart, ThinkPart
 
 from kimi_cli.notifications import is_notification_message
 
@@ -53,6 +53,78 @@ class DynamicInjectionProvider(ABC):
         """
         _ = enabled
         return None
+
+
+def _has_meaningful_content(msg: Message) -> bool:
+    """Whether a message carries something the model can continue from.
+
+    An assistant message whose only content is a ``ThinkPart`` (reasoning)
+    or whose text is empty has no visible payload: on the wire it becomes
+    ``content=None`` or ``content=""`` and servers that enforce
+    ``Last message must be from user or tool.`` reject the request.
+    """
+    if msg.tool_calls:
+        return True
+    for part in msg.content:
+        if isinstance(part, ThinkPart):
+            continue
+        if isinstance(part, TextPart) and not part.text.strip():
+            continue
+        return True
+    return False
+
+
+def sanitize_history(history: Sequence[Message]) -> list[Message]:
+    """Drop trailing messages that cannot legally end an LLM request.
+
+    When a stream is interrupted right after the model finishes thinking
+    (or the model answers with reasoning only), the persisted history can
+    end with an assistant message that carries no visible content and no
+    tool calls.  Servers such as Carcará reject the next request with
+    ``400 {"error":"Last message must be from user or tool."}``.
+
+    This walks the tail of the history and removes:
+      * assistant messages with no meaningful content and no tool calls;
+      * tool messages whose tool_call_id no longer matches any preceding
+        assistant tool call (orphaned after dropping an assistant message);
+      * user messages that consist solely of empty text (empty injections).
+
+    This is the domain-layer defense. The Carcará provider also applies a
+    wire-layer repair in ``_serialize_history`` (see
+    ``kosong.contrib.chat_provider.carcara``), so the two are intentionally
+    redundant: this guard fixes the history before any provider sees it, while
+    the provider guard protects any caller of ``CarcaraProvider``.
+
+    Returns a new list; the input is not mutated.
+    """
+    if not history:
+        return []
+
+    result = list(history)
+    while result:
+        last = result[-1]
+        if last.role == "assistant":
+            if not _has_meaningful_content(last):
+                result.pop()
+                continue
+        elif last.role == "tool":
+            # Check the tool_call_id is still referenced by a preceding assistant message.
+            referenced = any(
+                tc.id == last.tool_call_id
+                for msg in result
+                if msg.role == "assistant"
+                for tc in (msg.tool_calls or [])
+            )
+            if not referenced:
+                result.pop()
+                continue
+        elif last.role == "user":
+            texts = [part for part in last.content if isinstance(part, TextPart)]
+            if not last.content or (texts and not any(t.text.strip() for t in texts)):
+                result.pop()
+                continue
+        break
+    return result
 
 
 def normalize_history(history: Sequence[Message]) -> list[Message]:

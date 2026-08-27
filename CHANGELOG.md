@@ -11,6 +11,7 @@ Only write entries that are worth mentioning to users.
 
 ## Unreleased
 
+- Carcará: Fix history ending in an assistant message with only reasoning content (`reasoning_content` / `ThinkPart`) or empty text causing `400 {"error":"Last message must be from user or tool."}` — added `sanitize_history()` (soul layer) to drop invalid tails and provider-side tail repair (wire layer) that promotes reasoning into visible content
 - Kosong: Stop sending an empty `anthropic-beta` header when no beta features are declared — adaptive thinking removes the interleaved-thinking beta, which previously left an empty header value that some backends reject
 
 ## 1.49.0 (2026-07-16)
