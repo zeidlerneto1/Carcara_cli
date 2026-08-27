@@ -4,7 +4,7 @@ An agent defines the AI's behavior, including system prompts, available tools, a
 
 ## Built-in agents
 
-Kimi Code CLI provides two built-in agents. You can select one at startup with the `--agent` flag:
+Kimi Code CLI provides three built-in agents. You can select one at startup with the `--agent` flag:
 
 ```sh
 kimi --agent okabe
@@ -19,6 +19,10 @@ The default agent, suitable for general use. Enabled tools:
 ### `okabe`
 
 An experimental agent for testing new prompts and tools. Adds `SendDMail` on top of `default`.
+
+### `jarvis`
+
+A personal assistant agent with a custom system prompt. Inherits all tools from `default`.
 
 ## Custom agent files
 

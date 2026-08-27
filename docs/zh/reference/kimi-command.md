@@ -19,7 +19,7 @@ kimi [OPTIONS] COMMAND [ARGS]
 
 | 选项 | 说明 |
 |------|------|
-| `--agent NAME` | 使用内置 Agent，可选值：`default`、`okabe` |
+| `--agent NAME` | 使用内置 Agent，可选值：`default`、`okabe`、`jarvis` |
 | `--agent-file PATH` | 使用自定义 Agent 文件 |
 
 `--agent` 和 `--agent-file` 互斥，不能同时使用。详见 [Agent 与子 Agent](../customization/agents.md)。

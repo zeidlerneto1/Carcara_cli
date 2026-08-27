@@ -19,7 +19,7 @@ kimi [OPTIONS] COMMAND [ARGS]
 
 | Option | Description |
 |--------|-------------|
-| `--agent NAME` | Use built-in agent, options: `default`, `okabe` |
+| `--agent NAME` | Use built-in agent, options: `default`, `okabe`, `jarvis` |
 | `--agent-file PATH` | Use custom agent file |
 
 `--agent` and `--agent-file` are mutually exclusive. See [Agents and Subagents](../customization/agents.md) for details.

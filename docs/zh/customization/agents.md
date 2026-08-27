@@ -4,7 +4,7 @@ Agent 定义了 AI 的行为方式，包括系统提示词、可用工具和子 
 
 ## 内置 Agent
 
-Kimi Code CLI 提供两个内置 Agent。启动时可以通过 `--agent` 参数选择：
+Kimi Code CLI 提供三个内置 Agent。启动时可以通过 `--agent` 参数选择：
 
 ```sh
 kimi --agent okabe
@@ -19,6 +19,10 @@ kimi --agent okabe
 ### `okabe`
 
 实验性 Agent，用于实验新的提示词和工具。在 `default` 的基础上额外启用 `SendDMail`。
+
+### `jarvis`
+
+具有自定义系统提示词的个人助手 Agent。继承 `default` 的所有工具。
 
 ## 自定义 Agent 文件
 
