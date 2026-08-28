@@ -246,3 +246,97 @@ async def test_replace_empty_strings(
     assert not result.is_error
     assert "successfully edited" in result.message
     assert await file_path.read_text() == "Hello !"
+
+
+async def test_replace_empty_old_string_is_rejected(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """An empty `old` string must be rejected instead of inserting text unexpectedly."""
+    file_path = temp_work_dir / "test.txt"
+    await file_path.write_text("abc")
+
+    result = await str_replace_file_tool(Params(path=str(file_path), edit=Edit(old="", new="X")))
+
+    assert result.is_error
+    assert "`old` string cannot be empty" in result.message
+    assert await file_path.read_text() == "abc"  # Content unchanged
+
+
+async def test_replace_unmatched_edit_is_reported(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Edits that don't match must be reported instead of silently ignored."""
+    file_path = temp_work_dir / "test.txt"
+    await file_path.write_text("xy ab")
+
+    result = await str_replace_file_tool(
+        Params(
+            path=str(file_path),
+            edit=[
+                Edit(old="xy ab", new="q"),
+                Edit(old="not present", new="d"),
+            ],
+        )
+    )
+
+    assert not result.is_error
+    assert "successfully edited" in result.message
+    # Only the first edit applied; the second is reported as skipped.
+    assert "1 total replacement(s)" in result.message
+    assert "did not match" in result.message
+    assert "index 1" in result.message
+    assert await file_path.read_text() == "q"
+
+
+async def test_replace_counts_actual_replacements(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """The reported replacement count must reflect edits that actually applied."""
+    file_path = temp_work_dir / "test.txt"
+    await file_path.write_text("ab ab")
+
+    # First edit replaces all "ab"; the second has nothing left to replace.
+    result = await str_replace_file_tool(
+        Params(
+            path=str(file_path),
+            edit=[
+                Edit(old="ab", new="c", replace_all=True),
+                Edit(old="ab", new="d"),
+            ],
+        )
+    )
+
+    assert not result.is_error
+    assert "2 total replacement(s)" in result.message
+    assert "did not match" in result.message
+    assert await file_path.read_text() == "c c"
+
+
+async def test_replace_preserves_crlf_line_endings(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Editing a CRLF file must not silently rewrite the whole file as LF (Windows)."""
+    file_path = temp_work_dir / "test.txt"
+    await file_path.write_bytes(b"line1\r\nline2\r\nline3\r\n")
+
+    result = await str_replace_file_tool(
+        Params(path=str(file_path), edit=Edit(old="line2", new="CHANGED"))
+    )
+
+    assert not result.is_error
+    assert await file_path.read_bytes() == b"line1\r\nCHANGED\r\nline3\r\n"
+
+
+async def test_replace_preserves_lf_line_endings(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Editing an LF file must keep LF line endings."""
+    file_path = temp_work_dir / "test.txt"
+    await file_path.write_bytes(b"line1\nline2\nline3\n")
+
+    result = await str_replace_file_tool(
+        Params(path=str(file_path), edit=Edit(old="line2", new="CHANGED"))
+    )
+
+    assert not result.is_error
+    assert await file_path.read_bytes() == b"line1\nCHANGED\nline3\n"

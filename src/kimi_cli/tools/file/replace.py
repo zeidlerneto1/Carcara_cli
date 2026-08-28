@@ -78,12 +78,20 @@ class StrReplaceFile(CallableTool2[Params]):
             )
         return None
 
-    def _apply_edit(self, content: str, edit: Edit) -> str:
-        """Apply a single edit to the content."""
+    def _apply_edit(self, content: str, edit: Edit) -> tuple[str, int]:
+        """Apply a single edit, returning the new content and number of replacements made.
+
+        Raises ValueError if ``edit.old`` is empty, since ``str.replace`` would insert
+        text at unintended positions and silently corrupt the file.
+        """
+        if not edit.old:
+            raise ValueError("The `old` string cannot be empty.")
+        occurrences = content.count(edit.old)
+        if occurrences == 0:
+            return content, 0
         if edit.replace_all:
-            return content.replace(edit.old, edit.new)
-        else:
-            return content.replace(edit.old, edit.new, 1)
+            return content.replace(edit.old, edit.new), occurrences
+        return content.replace(edit.old, edit.new, 1), 1
 
     @override
     async def __call__(self, params: Params) -> ToolReturnValue:
@@ -128,18 +136,40 @@ class StrReplaceFile(CallableTool2[Params]):
                     brief="Invalid path",
                 )
 
+            # Detect the original line-ending style so it is preserved when writing back.
+            # read_text() normalizes CRLF to LF (universal newlines), while write_text()
+            # writes with no translation; without this, a CRLF file would be silently
+            # rewritten as LF, producing a whole-file diff on Windows.
+            raw = await p.read_bytes()
+            has_crlf = b"\r\n" in raw
+
             # Read the file content
             content = await p.read_text(errors="replace")
-
             original_content = content
+
             edits = [params.edit] if isinstance(params.edit, Edit) else params.edit
 
-            # Apply all edits
+            # Reject empty `old` strings up front: str.replace("") would insert text at
+            # unintended positions and silently corrupt the file.
             for edit in edits:
-                content = self._apply_edit(content, edit)
+                if not edit.old:
+                    return ToolError(
+                        message="The `old` string cannot be empty.",
+                        brief="Invalid edit",
+                    )
+
+            # Apply all edits sequentially, tracking actual replacements and any edits
+            # that failed to match.
+            total_replacements = 0
+            unmatched_edits: list[int] = []
+            for i, edit in enumerate(edits):
+                content, count = self._apply_edit(content, edit)
+                total_replacements += count
+                if count == 0:
+                    unmatched_edits.append(i)
 
             # Check if any changes were made
-            if content == original_content:
+            if total_replacements == 0:
                 return ToolError(
                     message="No replacements were made. The old string was not found in the file.",
                     brief="No replacements made",
@@ -166,24 +196,25 @@ class StrReplaceFile(CallableTool2[Params]):
                 if not result:
                     return result.rejection_error()
 
-            # Write the modified content back to the file
-            await p.write_text(content, errors="replace")
+            # Write the modified content back, preserving the original line endings.
+            write_content = content.replace("\n", "\r\n") if has_crlf else content
+            await p.write_text(write_content, errors="replace")
 
-            # Count changes for success message
-            total_replacements = 0
-            for edit in edits:
-                if edit.replace_all:
-                    total_replacements += original_content.count(edit.old)
-                else:
-                    total_replacements += 1 if edit.old in original_content else 0
+            message = (
+                f"File successfully edited. "
+                f"Applied {len(edits)} edit(s) with {total_replacements} total replacement(s)."
+            )
+            if unmatched_edits:
+                indexes = ", ".join(str(i) for i in unmatched_edits)
+                message += (
+                    f" Note: {len(unmatched_edits)} edit(s) (index {indexes}) did not match "
+                    "any text and were skipped."
+                )
 
             return ToolReturnValue(
                 is_error=False,
                 output="",
-                message=(
-                    f"File successfully edited. "
-                    f"Applied {len(edits)} edit(s) with {total_replacements} total replacement(s)."
-                ),
+                message=message,
                 display=diff_blocks,
             )
 
