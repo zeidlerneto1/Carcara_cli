@@ -38,7 +38,9 @@ from kimi_cli.llm import (
     ModelCapability,
     compute_max_completion_tokens,
     estimate_request_tokens,
+    estimate_static_tokens,
     find_kimi_provider,
+    model_display_name,
     with_kimi_generation_overrides,
     with_trace_callback,
 )
@@ -259,6 +261,10 @@ class KimiSoul:
 
         self._steer_queue: asyncio.Queue[str | list[ContentPart]] = asyncio.Queue()
         self._last_tool_calls: list[tuple[str, str]] = []
+        # Cache the static (system prompt + tools) token estimate so it is not
+        # recomputed (and tool schemas re-serialized) on every LLM step.
+        self._static_token_key: tuple[str, tuple[int, ...]] | None = None
+        self._static_token_estimate: int | None = None
         self._plan_mode: bool = self._runtime.session.state.plan_mode
         self._plan_session_id: str | None = self._runtime.session.state.plan_session_id
         self._root_trace_id: str | None = None
@@ -998,6 +1004,10 @@ class KimiSoul:
         # ═══════════════════════════════════════════════════════════════════════
         step_no = 0
         self._current_step_no = 0
+        # Allow at most one automatic model fallback per turn: after a 404 we
+        # may switch the LLM once and re-run the step. If the new model also
+        # 404s we surface the error instead of looping.
+        self._model_fallback_attempted = False
         while True:
             step_no += 1
 
@@ -1247,6 +1257,15 @@ class KimiSoul:
                     duration_ms=int((time.monotonic() - t0) * 1000),
                     input_tokens=self._context.token_count,
                 )
+            # A 404 "model not found" means the current model is no longer
+            # served. Attempt a one-shot automatic fallback to the first
+            # available model of the same provider and re-run this step so the
+            # user's prompt is not lost.
+            if await self._try_model_fallback(_step_exc):
+                try:
+                    return await self._step()
+                except Exception:
+                    raise
             raise
 
         # ═══════════════════════════════════════════════════════════════════════
@@ -1375,7 +1394,18 @@ class KimiSoul:
             configured_budget = None
 
         assert self._runtime.llm is not None
-        estimated_input_tokens = estimate_request_tokens(system_prompt, tools, history)
+        # The system prompt and tool schemas are stable across steps; only recompute
+        # their token estimate when the prompt or the tool set changes.
+        static_key = (system_prompt, tuple(sorted(id(t) for t in tools)))
+        if static_key != self._static_token_key:
+            self._static_token_estimate = estimate_static_tokens(system_prompt, tools)
+            self._static_token_key = static_key
+        estimated_input_tokens = estimate_request_tokens(
+            system_prompt,
+            tools,
+            history,
+            static_tokens=self._static_token_estimate,
+        )
         input_tokens = max(input_tokens_floor, estimated_input_tokens)
         if self._runtime.llm.max_context_size > 0:
             input_tokens += DEFAULT_COMPLETION_TOKEN_SAFETY_MARGIN
@@ -1657,6 +1687,109 @@ class KimiSoul:
             503,  # Service Unavailable
             504,  # Gateway Timeout
         )
+
+    async def _try_model_fallback(self, exc: BaseException) -> bool:
+        """Switch the active LLM to a fallback model when the current one 404s.
+
+        Returns ``True`` when a new model was installed and the caller should
+        re-run the step; ``False`` otherwise (not a model-not-found error,
+        already fell back this turn, subagent, or no alternative available).
+        """
+        if not self.is_root:
+            return False
+        if getattr(self, "_model_fallback_attempted", False):
+            return False
+        if not (
+            isinstance(exc, APIStatusError)
+            and exc.status_code == 404
+            and self._is_model_not_found_error(exc)
+        ):
+            return False
+
+        from kimi_cli.soul.model_fallback import (
+            maybe_fallback_on_unavailable,
+            persist_default_model,
+        )
+
+        llm = self._runtime.llm
+        if llm is None or llm.model_config is None:
+            return False
+        current_alias = next(
+            (alias for alias, m in self._runtime.config.models.items() if m is llm.model_config),
+            None,
+        )
+        if current_alias is None:
+            return False
+
+        fallback_llm, fallback_alias = await maybe_fallback_on_unavailable(
+            config=self._runtime.config,
+            current_alias=current_alias,
+            current_llm=llm,
+            session_id=self._runtime.session.id,
+            oauth=self._runtime.oauth,
+        )
+        if fallback_llm is None or fallback_alias is None:
+            return False
+
+        self._model_fallback_attempted = True
+        prev_name = model_display_name(llm.model_name, llm.model_config)
+        new_name = model_display_name(fallback_llm.model_name, fallback_llm.model_config)
+
+        # Install the new LLM on the runtime; the next step reads it.
+        self._runtime.llm = fallback_llm
+        self._runtime.config.default_model = fallback_alias
+        persist_default_model(self._runtime.config, fallback_alias)
+
+        logger.warning(
+            "Model unavailable, auto-switched from {prev} to {new}",
+            prev=prev_name,
+            new=new_name,
+        )
+        self._emit_model_fallback_notice(prev_name, new_name)
+        return True
+
+    @staticmethod
+    def _is_model_not_found_error(exc: APIStatusError) -> bool:
+        """Best-effort check that a 404 is a 'model not found' style error."""
+        msg = str(exc).lower()
+        for needle in (
+            "model not found",
+            "not found",
+            "does not exist",
+            "unknown model",
+            "no such model",
+            "model_not_found",
+            "model is not available",
+            "unavailable",
+        ):
+            if needle in msg:
+                return True
+        return False
+
+    def _emit_model_fallback_notice(self, prev_name: str, new_name: str) -> None:
+        """Notify the user (shell toast + LLM context) about a model fallback."""
+        from kimi_cli.notifications import NotificationEvent, to_wire_notification
+
+        event = NotificationEvent(
+            id=self._runtime.notifications.new_id(),
+            category="system",
+            type="model_fallback",
+            source_kind="model_fallback",
+            source_id=self._runtime.session.id,
+            title="Model unavailable — auto-switched",
+            body=(
+                f"{prev_name} is no longer available from its provider. "
+                f"Switched to {new_name}, which is now the default model."
+            ),
+            severity="warning",
+            targets=["shell", "llm"],
+            dedupe_key=f"model_fallback:{self._runtime.session.id}:{new_name}",
+        )
+        view = self._runtime.notifications.publish(event)
+        try:
+            wire_send(to_wire_notification(view))
+        except Exception:
+            logger.debug("Failed to emit model fallback wire notification")
 
     async def _run_with_connection_recovery(
         self,

@@ -27,6 +27,11 @@ from kimi_cli.soul import RunCancelled, run_soul
 from kimi_cli.soul.agent import Runtime, load_agent
 from kimi_cli.soul.context import Context
 from kimi_cli.soul.kimisoul import KimiSoul
+from kimi_cli.soul.model_fallback import (
+    MODEL_FALLBACK_CHECK_TIMEOUT_S,
+    maybe_fallback_on_unavailable,
+    persist_default_model,
+)
 from kimi_cli.soul.toolset import KimiToolset
 from kimi_cli.utils.aioqueue import QueueShutDown
 from kimi_cli.utils.envvar import get_env_bool
@@ -248,6 +253,43 @@ class KimiCLI:
             session_id=session.id,
             oauth=oauth,
         )
+
+        # Startup availability probe: if the selected model is no longer served
+        # by its provider endpoint, switch to the first available model of the
+        # same provider, persist it, and remember a user-facing notice. Skipped
+        # when the model came from an explicit --model flag or an env override,
+        # and when the probe cannot reach the endpoint (availability unknown).
+        model_fallback_notice: tuple[str, str] | None = None
+        if (
+            not model_name
+            and config.default_model
+            and llm is not None
+            and llm.model_config is not None
+            and llm.model_config.model
+            and not env_overrides.get("KIMI_MODEL_NAME")
+        ):
+            current_alias = next(
+                (alias for alias, m in config.models.items() if m is llm.model_config),
+                None,
+            )
+            fallback_llm, fallback_alias = await maybe_fallback_on_unavailable(
+                config=config,
+                current_alias=current_alias,
+                current_llm=llm,
+                session_id=session.id,
+                oauth=oauth,
+                timeout=MODEL_FALLBACK_CHECK_TIMEOUT_S,
+            )
+            if fallback_llm is not None and fallback_alias is not None:
+                old_display = model_display_name(llm.model_name, llm.model_config)
+                new_display = model_display_name(fallback_llm.model_name, fallback_llm.model_config)
+                model_fallback_notice = (old_display, new_display)
+                llm = fallback_llm
+                model = fallback_llm.model_config
+                provider = fallback_llm.provider_config
+                config.default_model = fallback_alias
+                persist_default_model(config, fallback_alias)
+
         if llm is not None:
             logger.info("Using LLM provider: {provider}", provider=provider)
             logger.info("Using LLM model: {model}", model=model)
@@ -375,7 +417,7 @@ class KimiCLI:
             mcp_ms=_phase_timings_ms.get("mcp_ms", 0),
         )
 
-        return KimiCLI(soul, runtime, env_overrides, bg_refresh_task)
+        return KimiCLI(soul, runtime, env_overrides, bg_refresh_task, model_fallback_notice)
 
     def __init__(
         self,
@@ -383,11 +425,15 @@ class KimiCLI:
         _runtime: Runtime,
         _env_overrides: dict[str, str],
         _bg_refresh_task: asyncio.Task[None] | None = None,
+        _model_fallback_notice: tuple[str, str] | None = None,
     ) -> None:
         self._soul = _soul
         self._runtime = _runtime
         self._env_overrides = _env_overrides
         self._bg_refresh_task = _bg_refresh_task
+        # (previous_display_name, new_display_name) set when the startup
+        # availability probe switched the active model to a fallback.
+        self._model_fallback_notice = _model_fallback_notice
 
     @property
     def soul(self) -> KimiSoul:
@@ -745,16 +791,38 @@ class KimiCLI:
                 )
             )
         else:
-            welcome_info.append(
-                WelcomeInfoItem(
-                    name="Model",
-                    value=model_display_name(
-                        self._soul.model_name,
-                        self._runtime.llm.model_config if self._runtime.llm else None,
-                    ),
-                    level=WelcomeInfoItem.Level.INFO,
-                )
+            current_display = model_display_name(
+                self._soul.model_name,
+                self._runtime.llm.model_config if self._runtime.llm else None,
             )
+            if self._model_fallback_notice is not None:
+                prev_display, new_display = self._model_fallback_notice
+                welcome_info.append(
+                    WelcomeInfoItem(
+                        name="Model",
+                        value=f"{current_display} (auto-fallback: {prev_display} unavailable)",
+                        level=WelcomeInfoItem.Level.WARN,
+                    )
+                )
+                welcome_info.append(
+                    WelcomeInfoItem(
+                        name="Notice",
+                        value=(
+                            f"{prev_display} is no longer available from its provider. "
+                            f"Switched to {new_display}. This choice was saved as the "
+                            "default model."
+                        ),
+                        level=WelcomeInfoItem.Level.WARN,
+                    )
+                )
+            else:
+                welcome_info.append(
+                    WelcomeInfoItem(
+                        name="Model",
+                        value=current_display,
+                        level=WelcomeInfoItem.Level.INFO,
+                    )
+                )
             model_name = self._soul.model_name
             if model_name not in (
                 "kimi-for-coding",

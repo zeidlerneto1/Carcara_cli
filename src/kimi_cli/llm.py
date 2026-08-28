@@ -196,10 +196,25 @@ def compute_max_completion_tokens(
     return max(1, min(requested, remaining))
 
 
+def estimate_static_tokens(system_prompt: str, tools: Sequence[Tool]) -> int:
+    """Estimate the token-bearing parts that are stable across steps of a session.
+
+    These are the system prompt and the tool schemas. They do not change between
+    successive LLM calls of the same turn, so callers can compute this once and reuse
+    it via ``estimate_request_tokens(..., static_tokens=...)`` to avoid re-serializing
+    every tool schema (``json.dumps``) on each step.
+    """
+    return _estimate_text_tokens(system_prompt) + sum(
+        _estimate_tool_tokens(tool) for tool in tools
+    )
+
+
 def estimate_request_tokens(
     system_prompt: str,
     tools: Sequence[Tool],
     history: Sequence[Message],
+    *,
+    static_tokens: int | None = None,
 ) -> int:
     """Estimate all token-bearing parts of a chat request.
 
@@ -207,12 +222,13 @@ def estimate_request_tokens(
     it includes the system prompt, tool schemas, message metadata, tool calls, and media. Exact
     tokenization is provider/model specific, so callers should still reserve a small safety
     margin when using the result to derive a hard completion limit.
+
+    ``static_tokens`` may be supplied to reuse a value previously computed by
+    ``estimate_static_tokens`` (system prompt + tools); when omitted it is recomputed.
     """
-    return (
-        _estimate_text_tokens(system_prompt)
-        + sum(_estimate_tool_tokens(tool) for tool in tools)
-        + sum(_estimate_message_tokens(message) for message in history)
-    )
+    if static_tokens is None:
+        static_tokens = estimate_static_tokens(system_prompt, tools)
+    return static_tokens + sum(_estimate_message_tokens(message) for message in history)
 
 
 def estimate_message_tokens(messages: Sequence[Message]) -> int:

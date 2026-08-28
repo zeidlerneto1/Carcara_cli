@@ -181,6 +181,23 @@ class _BackgroundAutoTriggerPromptState(Protocol):
     async def wait_for_input_activity(self) -> None: ...
 
 
+def _is_model_not_found(e: APIStatusError) -> bool:
+    """Best-effort: is this 404 a 'model not found' style error?"""
+    msg = str(e).lower()
+    return any(
+        needle in msg
+        for needle in (
+            "model not found",
+            "not found",
+            "does not exist",
+            "unknown model",
+            "no such model",
+            "model_not_found",
+            "unavailable",
+        )
+    )
+
+
 class Shell:
     def __init__(
         self,
@@ -983,6 +1000,12 @@ class Shell:
                 )
             elif isinstance(e, APIStatusError) and e.status_code == 403:
                 console.print(f"[red]Server: {e}[/red]")
+            elif isinstance(e, APIStatusError) and e.status_code == 404 and _is_model_not_found(e):
+                console.print(
+                    "[red]The current model is not available on its provider.[/red]\n"
+                    "[dim]Use [bold]/model[/bold] to pick a different model, or check your "
+                    "provider configuration.[/dim]"
+                )
             elif isinstance(e, APIConnectionError):
                 console.print(
                     f"[red]Network connection failed: {e}[/red]\n"

@@ -52,6 +52,11 @@ shell UI, ACP server mode for IDE integrations, and MCP tool loading.
   handles slash commands (`src/kimi_cli/soul/slash.py`), appends to `Context`
   (`src/kimi_cli/soul/context.py`), calls the LLM (kosong), runs tools, and performs compaction
   (`src/kimi_cli/soul/compaction.py`) when needed.
+- **Model fallback**: `src/kimi_cli/soul/model_fallback.py` detects when the current model is no
+  longer served by its provider endpoint and switches to the first available model of the same
+  provider. It runs at startup (in `app.py`, before the first prompt) and on a 404 "model not
+  found" error during a turn (in `kimisoul.py`). The new default model is persisted to the config
+  file and the user is notified with the working model name.
 - **Approvals**: `src/kimi_cli/soul/approval.py` is the tool-facing facade. `ApprovalRuntime`
   in `src/kimi_cli/approval_runtime/` is the session-level source of truth for pending approvals,
   and approval requests are projected onto the root wire stream for Shell/Web style UIs.

@@ -438,3 +438,48 @@ async def test_compute_overrides_does_not_copy_chat_provider(
     overrides_after_recovery = _compute_overrides(soul, runtime_provider)
     assert isinstance(overrides_after_recovery, dict)
     assert runtime_provider is chat_provider
+def test_static_token_estimate_cache_recomputes_when_tools_change(
+    runtime: Runtime, tmp_path: Path
+) -> None:
+    """The static (system prompt + tools) token estimate must be invalidated when the
+    tool set changes between calls to ``_compute_completion_overrides``, not just reused."""
+    chat_provider = Kimi(
+        model="kimi-k2",
+        base_url="https://api.test/v1",
+        api_key="test-key",
+        stream=False,
+    )
+    runtime.llm = _make_kimi_llm(chat_provider, max_context_size=8_192)
+    soul = _make_soul(runtime, tmp_path)
+
+    small_tool = Tool(
+        name="small",
+        description="a tiny tool",
+        parameters={"type": "object", "properties": {"q": {"type": "string"}}},
+    )
+    big_tool = Tool(
+        name="big",
+        description="a tool with a very large schema " * 200,
+        parameters={
+            "type": "object",
+            "properties": {"field": {"type": "string", "description": "x" * 5_000}},
+        },
+    )
+    history = [Message(role="user", content="hi")]
+
+    overrides_small = _compute_overrides(
+        soul, chat_provider, tools=[small_tool], history=history
+    )
+    # Same tool set again -> cache hit, identical result.
+    overrides_small_again = _compute_overrides(
+        soul, chat_provider, tools=[small_tool], history=history
+    )
+    assert overrides_small == overrides_small_again
+
+    # Different tool set -> cache must recompute the static estimate.
+    overrides_big = _compute_overrides(
+        soul, chat_provider, tools=[big_tool], history=history
+    )
+    assert overrides_small is not None and overrides_big is not None
+    assert overrides_big["max_completion_tokens"] < overrides_small["max_completion_tokens"]
+

@@ -230,6 +230,7 @@ class KimiToolset:
     def __init__(self) -> None:
         self._tool_dict: dict[str, ToolType] = {}
         self._hidden_tools: set[str] = set()
+        self._tools_cache: list[Tool] | None = None
         self._mcp_servers: dict[str, MCPServerInfo] = {}
         self._mcp_loading_task: asyncio.Task[None] | None = None
         self._deferred_mcp_load: tuple[list[MCPConfig], Runtime] | None = None
@@ -250,19 +251,26 @@ class KimiToolset:
     def set_hook_engine(self, engine: HookEngine) -> None:
         self._hook_engine = engine
 
+    def _invalidate_tools_cache(self) -> None:
+        """Drop the cached ``tools`` list so it is rebuilt on next access."""
+        self._tools_cache = None
+
     def add(self, tool: ToolType) -> None:
         self._tool_dict[tool.name] = tool
+        self._invalidate_tools_cache()
 
     def hide(self, tool_name: str) -> bool:
         """Hide a tool from the LLM tool list. Returns True if the tool exists."""
         if tool_name in self._tool_dict:
             self._hidden_tools.add(tool_name)
+            self._invalidate_tools_cache()
             return True
         return False
 
     def unhide(self, tool_name: str) -> None:
         """Restore a hidden tool to the LLM tool list."""
         self._hidden_tools.discard(tool_name)
+        self._invalidate_tools_cache()
 
     @overload
     def find(self, tool_name_or_type: str) -> ToolType | None: ...
@@ -279,9 +287,13 @@ class KimiToolset:
 
     @property
     def tools(self) -> list[Tool]:
-        return [
-            tool.base for tool in self._tool_dict.values() if tool.name not in self._hidden_tools
-        ]
+        if self._tools_cache is None:
+            self._tools_cache = [
+                tool.base
+                for tool in self._tool_dict.values()
+                if tool.name not in self._hidden_tools
+            ]
+        return self._tools_cache
 
     def begin_step(self, previous_calls: list[tuple[str, str]], *, step_no: int = 0) -> None:
         """Called before each step to set up deduplication state."""
