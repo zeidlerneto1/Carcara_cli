@@ -187,6 +187,27 @@ uv run kimi --background -p "faça um relatório dos commits"
 uv run kimi --print -p "gera um Dockerfile" > Dockerfile
 ```
 
+### Agentes embutidos
+
+Você pode escolher um agente embutido na inicialização com a flag `--agent`:
+
+| Agente | Descrição |
+|--------|-----------|
+| `default` | Agente padrão, adequado para uso geral. |
+| `okabe` | Agente experimental para testar novos prompts e ferramentas. |
+| `jarvis` | Assistente pessoal com system prompt próprio (persona ENI), herda todas as ferramentas do `default`. |
+
+```bash
+# Agente padrão (default)
+uv run kimi
+
+# Agente experimental okabe
+uv run kimi --agent okabe -p "teste"
+
+# Agente jarvis (assistente pessoal)
+uv run kimi --agent jarvis -p "oi"
+```
+
 ### Thinking modes
 
 ```bash
