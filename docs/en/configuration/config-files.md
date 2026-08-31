@@ -126,6 +126,7 @@ If a `providers` or `models` key contains `.`, you must use a quoted TOML key. O
 | `max_context_size` | `integer` | Yes | Maximum context length (in tokens) |
 | `capabilities` | `array` | No | Model capability list, see [Providers](./providers.md#model-capabilities) for details |
 | `display_name` | `string` | No | Human-readable model name shown in the welcome panel, prompt status bar, `/model` picker, and switch confirmations; falls back to `model` when unset. For OAuth-logged-in managed models, this field is auto-refreshed from the provider's `/models` endpoint at startup |
+| `generation` | `table` | No | Per-model generation/sampling parameters (applies to the Carcará provider). See [Model generation](#model-generation) below |
 
 Example:
 
@@ -145,6 +146,40 @@ provider = "openai"
 model = "gpt-4.1"
 max_context_size = 1047576
 capabilities = ["thinking"]
+```
+
+### Model generation
+
+The `generation` sub-table under a model configures sampling and generation
+parameters. It applies to the Carcará provider and takes precedence over the
+`CARCARA_*` environment variables.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `temperature` | `number` | env | Sampling temperature |
+| `top_p` | `number` | env | Nucleus sampling threshold |
+| `min_p` | `number` | env | Minimum probability for a token to be considered |
+| `top_k` | `integer` | env | Top-k sampling |
+| `dynatemp_range` | `number` | env | Dynamic temperature range |
+| `dynatemp_exponent` | `number` | env | Dynamic temperature exponent |
+| `xtc_probability` | `number` | env | XTC probability |
+| `xtc_threshold` | `number` | env | XTC threshold |
+| `typ_p` | `number` | env | Typical sampling threshold |
+| `max_completion_tokens` | `integer` | dynamic | Maximum completion tokens; when unset the agent caps it dynamically from the remaining context |
+| `thinking_budget_tokens` | `integer` | effort map | Thinking budget (tokens); overrides the default `low/medium/high` budget when set |
+| `backend_sampling` | `boolean` | env | Whether to use backend (server-side) sampling |
+
+```toml
+[models."carcara/deepseek"]
+provider = "carcara"
+model = "DeepSeek-v4-Flash-0731"
+max_context_size = 131072
+
+[models."carcara/deepseek".generation]
+temperature = 0.6
+top_p = 0.9
+min_p = 0.05
+thinking_budget_tokens = 4096
 ```
 
 ### `loop_control`

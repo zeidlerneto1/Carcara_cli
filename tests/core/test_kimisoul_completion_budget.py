@@ -8,6 +8,7 @@ from kosong.chat_provider import APIConnectionError, ChatProvider
 from kosong.chat_provider.chaos import ChaosChatProvider, ChaosConfig
 from kosong.chat_provider.kimi import Kimi
 from kosong.chat_provider.mock import MockChatProvider, MockStreamedMessage
+from kosong.contrib.chat_provider.carcara import CarcaraProvider
 from kosong.message import Message
 from kosong.tooling import Tool
 from kosong.tooling.empty import EmptyToolset
@@ -438,6 +439,8 @@ async def test_compute_overrides_does_not_copy_chat_provider(
     overrides_after_recovery = _compute_overrides(soul, runtime_provider)
     assert isinstance(overrides_after_recovery, dict)
     assert runtime_provider is chat_provider
+
+
 def test_static_token_estimate_cache_recomputes_when_tools_change(
     runtime: Runtime, tmp_path: Path
 ) -> None:
@@ -467,9 +470,7 @@ def test_static_token_estimate_cache_recomputes_when_tools_change(
     )
     history = [Message(role="user", content="hi")]
 
-    overrides_small = _compute_overrides(
-        soul, chat_provider, tools=[small_tool], history=history
-    )
+    overrides_small = _compute_overrides(soul, chat_provider, tools=[small_tool], history=history)
     # Same tool set again -> cache hit, identical result.
     overrides_small_again = _compute_overrides(
         soul, chat_provider, tools=[small_tool], history=history
@@ -477,9 +478,57 @@ def test_static_token_estimate_cache_recomputes_when_tools_change(
     assert overrides_small == overrides_small_again
 
     # Different tool set -> cache must recompute the static estimate.
-    overrides_big = _compute_overrides(
-        soul, chat_provider, tools=[big_tool], history=history
-    )
+    overrides_big = _compute_overrides(soul, chat_provider, tools=[big_tool], history=history)
     assert overrides_small is not None and overrides_big is not None
     assert overrides_big["max_completion_tokens"] < overrides_small["max_completion_tokens"]
 
+
+@pytest.mark.asyncio
+async def test_compute_completion_overrides_applies_to_carcara(
+    runtime: Runtime, tmp_path: Path
+) -> None:
+    """Carcara providers now receive a dynamic max_completion_tokens override."""
+    chat_provider = CarcaraProvider(
+        model="DeepSeek-v4-Flash",
+        base_url="https://carcara.example/v1",
+        api_key="test-key",
+        stream=False,
+    )
+    runtime.llm = LLM(
+        chat_provider=chat_provider,
+        max_context_size=131_072,
+        capabilities=set(),
+        model_config=LLMModel(
+            provider="carcara",
+            model="DeepSeek-v4-Flash",
+            max_context_size=131_072,
+        ),
+        provider_config=LLMProvider(
+            type="carcara",
+            base_url="https://carcara.example/v1",
+            api_key=SecretStr("test-key"),
+        ),
+    )
+    soul = _make_soul(runtime, tmp_path)
+    await soul.context.update_token_count(60_000)
+
+    overrides = _compute_overrides(soul, chat_provider)
+    assert overrides is not None
+    assert "max_completion_tokens" in overrides
+    assert overrides["max_completion_tokens"] > 0
+    # remaining = 131072 - 60000 - safety_margin => well below the hard cap.
+    assert overrides["max_completion_tokens"] < 131_072
+
+
+def test_request_overrides_reach_carcara() -> None:
+    """with_kimi_generation_overrides wraps a Carcara provider for request overrides."""
+    chat_provider = CarcaraProvider(
+        model="DeepSeek-v4-Flash",
+        base_url="https://carcara.example/v1",
+        api_key="test-key",
+        stream=False,
+    )
+    wrapped = with_kimi_generation_overrides(chat_provider, {"max_completion_tokens": 4096})
+    assert wrapped is not chat_provider
+    # The wrapper delegates model_name / thinking_effort to the Carcara provider.
+    assert wrapped.model_name == "DeepSeek-v4-Flash"

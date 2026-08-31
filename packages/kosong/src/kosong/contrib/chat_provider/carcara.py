@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any, Self
 
 import httpx
@@ -12,13 +12,11 @@ from kosong.chat_provider import (
     APIConnectionError,
     APIStatusError,
     APITimeoutError,
-    ChatProvider,
-    RetryableChatProvider,
     StreamedMessagePart,
     ThinkingEffort,
     TokenUsage,
 )
-from kosong.message import ContentPart, Message, TextPart, ThinkPart, ToolCall, ToolCallPart
+from kosong.message import Message, TextPart, ThinkPart, ToolCall, ToolCallPart
 from kosong.tooling import Tool
 
 
@@ -53,7 +51,11 @@ class CarcaraProvider:
             "function": {
                 "name": "get_environment",
                 "description": "Retorna o contexto de execução: que você (o modelo) está rodando no supercomputador Santos Dumont (SDumont) do LNCC, com as características do ambiente. Chame quando precisar saber/declarar ONDE está sendo executado ou quais recursos de HPC estão disponíveis.",
-                "parameters": {"type": "object", "properties": {}, "title": "get_environmentArguments"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "title": "get_environmentArguments",
+                },
             },
         },
         {
@@ -111,7 +113,10 @@ class CarcaraProvider:
         "CARCARA_XTC_PROBABILITY": ("xtc_probability", float),
         "CARCARA_XTC_THRESHOLD": ("xtc_threshold", float),
         "CARCARA_TYP_P": ("typ_p", float),
-        "CARCARA_BACKEND_SAMPLING": ("backend_sampling", lambda v: v.lower() in ("1", "true", "yes", "on")),
+        "CARCARA_BACKEND_SAMPLING": (
+            "backend_sampling",
+            lambda v: v.lower() in ("1", "true", "yes", "on"),
+        ),
     }
 
     def __init__(
@@ -122,6 +127,7 @@ class CarcaraProvider:
         base_url: str | None = None,
         stream: bool = True,
         reasoning_key: str | None = None,
+        generation_kwargs: dict[str, Any] | None = None,
         **client_kwargs: Any,
     ):
         self.model = model
@@ -142,14 +148,17 @@ class CarcaraProvider:
         self._client_kwargs = dict(client_kwargs)
         self._client: httpx.AsyncClient | None = None
 
-        self._sampling_params: dict[str, Any] = {}
+        self._generation_kwargs: dict[str, Any] = {}
         for env_name, (field_name, converter) in self.SAMPLING_ENV_MAP.items():
             raw = os.getenv(env_name)
             if raw is not None:
                 try:
-                    self._sampling_params[field_name] = converter(raw)
+                    self._generation_kwargs[field_name] = converter(raw)
                 except Exception:
                     pass
+        if generation_kwargs:
+            # Config-provided params take precedence over CARCARA_* env vars.
+            self._generation_kwargs.update(generation_kwargs)
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -240,10 +249,9 @@ class CarcaraProvider:
         if isinstance(content, str):
             return bool(content) or bool(entry.get("tool_calls"))
         if isinstance(content, list):
-            return (
-                any(not (isinstance(p, dict) and p.get("type") == "think") for p in content)
-                or bool(entry.get("tool_calls"))
-            )
+            return any(
+                not (isinstance(p, dict) and p.get("type") == "think") for p in content
+            ) or bool(entry.get("tool_calls"))
         return True
 
     async def generate(
@@ -251,6 +259,8 @@ class CarcaraProvider:
         system_prompt: str,
         tools: Sequence[Tool],
         history: Sequence[Message],
+        *,
+        generation_overrides: Mapping[str, Any] | None = None,
     ) -> CarcaraStreamedMessage:
         messages: list[dict[str, Any]] = self._serialize_history(history)
         if system_prompt:
@@ -260,14 +270,16 @@ class CarcaraProvider:
         if os.getenv("CARCARA_LNCC_TOOLS", "").lower() in ("1", "true", "yes", "on"):
             all_tools.extend(self.LNCC_TOOLS)
         for tool in tools:
-            all_tools.append({
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                },
-            })
+            all_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    },
+                }
+            )
 
         body: dict[str, Any] = {
             "model": self.model,
@@ -275,14 +287,23 @@ class CarcaraProvider:
             "stream": self.stream,
             **self.EXTRA_BODY,
         }
-        body.update(self._sampling_params)
+        body.update(self._generation_kwargs)
+        if generation_overrides:
+            body.update(generation_overrides)
 
+        thinking_budget = body.pop("thinking_budget_tokens", None)
         if self._thinking_effort and self._thinking_effort != "off":
             body["chat_template_kwargs"] = {"enable_thinking": True}
-            if self._thinking_effort in self.THINKING_BUDGET_MAP:
+            if thinking_budget is not None:
+                body["thinking_budget_tokens"] = thinking_budget
+            elif self._thinking_effort in self.THINKING_BUDGET_MAP:
                 body["thinking_budget_tokens"] = self.THINKING_BUDGET_MAP[self._thinking_effort]
         else:
             body["chat_template_kwargs"] = {"enable_thinking": False}
+
+        backend_sampling = body.pop("backend_sampling", None)
+        if backend_sampling is not None:
+            body["backend_sampling"] = bool(backend_sampling)
 
         if all_tools:
             body["tools"] = all_tools
@@ -317,6 +338,7 @@ class CarcaraProvider:
             ) from e
         except Exception as e:
             from kosong.chat_provider import ChatProviderError
+
             raise ChatProviderError(f"Carcara request failed: {e}") from e
 
     def on_retryable_error(self, error: BaseException) -> bool:
@@ -327,10 +349,21 @@ class CarcaraProvider:
         new_self._thinking_effort = effort
         return new_self
 
+    def with_generation_kwargs(self, **kwargs: Any) -> Self:
+        """Copy the chat provider, updating the generation kwargs with the given values.
+
+        Config-provided params passed here take precedence over ``CARCARA_*`` env
+        vars read at construction time.
+        """
+        new_self = copy.copy(self)
+        new_self._generation_kwargs = copy.deepcopy(self._generation_kwargs)
+        new_self._generation_kwargs.update(kwargs)
+        return new_self
+
     @property
     def model_parameters(self) -> dict[str, Any]:
         params: dict[str, Any] = {"base_url": self._base_url, "model": self.model}
-        params.update(self._sampling_params)
+        params.update(self._generation_kwargs)
         return params
 
 

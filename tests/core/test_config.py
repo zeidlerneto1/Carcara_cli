@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from inline_snapshot import snapshot
 
@@ -188,3 +190,33 @@ def test_carcara_default_config_roundtrips():
     reloaded = Config.model_validate(config.model_dump(mode="json", exclude_none=True))
     assert reloaded.default_model == "carcara/deepseek"
     assert "carcara" in reloaded.providers
+
+
+def test_model_generation_parsed_from_config_string():
+    """ModelGeneration is parsed from the generation section of a model."""
+    cfg = json.loads(
+        '{"providers": {"carcara": {"type": "carcara", "base_url": "https://carcara.example/v1", "api_key": ""}}, "models": {"carcara/deepseek": {"provider": "carcara", "model": "DeepSeek-v4-Flash", "max_context_size": 131072, "generation": {"temperature": 0.6, "top_p": 0.9, "min_p": 0.05, "thinking_budget_tokens": 4096, "max_completion_tokens": 8192}}}}'
+    )
+    config = load_config_from_string(json.dumps(cfg))
+    gen = config.models["carcara/deepseek"].generation
+    assert gen is not None
+    assert gen.temperature == 0.6
+    assert gen.top_p == 0.9
+    assert gen.min_p == 0.05
+    assert gen.thinking_budget_tokens == 4096
+    assert gen.max_completion_tokens == 8192
+
+
+def test_model_generation_roundtrips_through_model_dump():
+    """generation appears in model_dump and validates on reload."""
+    cfg = json.loads(
+        '{"providers": {"carcara": {"type": "carcara", "base_url": "https://carcara.example/v1", "api_key": ""}}, "models": {"carcara/deepseek": {"provider": "carcara", "model": "DeepSeek-v4-Flash", "max_context_size": 131072, "generation": {"temperature": 0.6}}}}'
+    )
+    config = load_config_from_string(json.dumps(cfg))
+    dumped = config.model_dump(mode="json", exclude_none=True)
+    gen_dumped = dumped["models"]["carcara/deepseek"]["generation"]
+    assert gen_dumped == {"temperature": 0.6}
+    reloaded = Config.model_validate(dumped)
+    reloaded_gen = reloaded.models["carcara/deepseek"].generation
+    assert reloaded_gen is not None
+    assert reloaded_gen.temperature == 0.6

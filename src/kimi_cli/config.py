@@ -57,6 +57,40 @@ class LLMProvider(BaseModel):
         return v.get_secret_value()
 
 
+class ModelGeneration(BaseModel):
+    """Per-model generation/sampling parameters (Carcará / llama.cpp compatible).
+
+    These map to the sampling/body params the ``CarcaraProvider`` understands.
+    When set, they override any ``CARCARA_*`` environment variables for the model.
+    """
+
+    temperature: float | None = None
+    """Sampling temperature."""
+    top_p: float | None = None
+    """Nucleus sampling threshold."""
+    min_p: float | None = None
+    """Minimum probability for a token to be considered."""
+    top_k: int | None = None
+    """Top-k sampling."""
+    dynatemp_range: float | None = None
+    """Dynamic temperature range."""
+    dynatemp_exponent: float | None = None
+    """Dynamic temperature exponent."""
+    xtc_probability: float | None = None
+    """XTC probability."""
+    xtc_threshold: float | None = None
+    """XTC threshold."""
+    typ_p: float | None = None
+    """Typical sampling threshold."""
+    max_completion_tokens: int | None = None
+    """Maximum number of completion tokens."""
+    thinking_budget_tokens: int | None = None
+    """Thinking budget (tokens) when the model is in thinking mode. Overrides the
+    default ``low/medium/high`` budget map when set."""
+    backend_sampling: bool | None = None
+    """Whether to use backend (server-side) sampling."""
+
+
 class LLMModel(BaseModel):
     """LLM model configuration."""
 
@@ -70,6 +104,8 @@ class LLMModel(BaseModel):
     """Model capabilities"""
     display_name: str | None = None
     """Human-readable model name (sourced from the provider's models API when available)"""
+    generation: ModelGeneration | None = None
+    """Per-model generation/sampling parameters (applies to the Carcará provider)."""
 
 
 class LoopControl(BaseModel):

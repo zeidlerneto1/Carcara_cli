@@ -39,7 +39,7 @@ from kimi_cli.llm import (
     compute_max_completion_tokens,
     estimate_request_tokens,
     estimate_static_tokens,
-    find_kimi_provider,
+    find_generation_override_provider,
     model_display_name,
     with_kimi_generation_overrides,
     with_trace_callback,
@@ -1382,11 +1382,11 @@ class KimiSoul:
         stays attached to the single instance owned by ``Runtime.llm`` — retry recovery
         in ``Kimi.on_retryable_error`` therefore affects subsequent steps as intended.
         """
-        kimi_provider = find_kimi_provider(chat_provider)
-        if kimi_provider is None:
+        gen_provider = find_generation_override_provider(chat_provider)
+        if gen_provider is None:
             return None
 
-        parameters = kimi_provider.model_parameters
+        parameters = gen_provider.model_parameters
         configured_budget = parameters.get("max_completion_tokens")
         if "max_completion_tokens" in parameters and configured_budget is None:
             return None

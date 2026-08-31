@@ -126,6 +126,7 @@ custom_headers = { "X-Custom-Header" = "value" }
 | `max_context_size` | `integer` | 是 | 最大上下文长度（token 数） |
 | `capabilities` | `array` | 否 | 模型能力列表，详见 [平台与模型](./providers.md#模型能力) |
 | `display_name` | `string` | 否 | 模型展示名。在欢迎界面、提示框状态栏、`/model` 选单和切换确认消息中显示；未设置时回落到 `model`。对于 OAuth 登录的托管模型，启动时会从供应商的 `/models` 接口自动刷新此字段 |
+| `generation` | `table` | 否 | 模型级生成/采样参数（适用于 Carcará 供应商）。详见下方 [模型生成](#模型生成) |
 
 示例：
 
@@ -145,6 +146,39 @@ provider = "openai"
 model = "gpt-4.1"
 max_context_size = 1047576
 capabilities = ["thinking"]
+```
+
+### 模型生成
+
+模型下的 `generation` 子表用于配置采样与生成参数。它适用于 Carcará 供应商，
+优先级高于 `CARCARA_*` 环境变量。
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `temperature` | `number` | 环境变量 | 采样温度 |
+| `top_p` | `number` | 环境变量 | 核采样阈值 |
+| `min_p` | `number` | 环境变量 | 候选 token 的最小概率 |
+| `top_k` | `integer` | 环境变量 | Top-k 采样 |
+| `dynatemp_range` | `number` | 环境变量 | 动态温度范围 |
+| `dynatemp_exponent` | `number` | 环境变量 | 动态温度指数 |
+| `xtc_probability` | `number` | 环境变量 | XTC 概率 |
+| `xtc_threshold` | `number` | 环境变量 | XTC 阈值 |
+| `typ_p` | `number` | 环境变量 | 典型采样阈值 |
+| `max_completion_tokens` | `integer` | 动态 | 最大补全 token 数；未设置时由 Agent 根据剩余上下文动态设上限 |
+| `thinking_budget_tokens` | `integer` | effort 映射 | 思考预算（token 数）；设置后覆盖默认的 `low/medium/high` 预算 |
+| `backend_sampling` | `boolean` | 环境变量 | 是否使用后端（服务端）采样 |
+
+```toml
+[models."carcara/deepseek"]
+provider = "carcara"
+model = "DeepSeek-v4-Flash-0731"
+max_context_size = 131072
+
+[models."carcara/deepseek".generation]
+temperature = 0.6
+top_p = 0.9
+min_p = 0.05
+thinking_budget_tokens = 4096
 ```
 
 ### `loop_control`

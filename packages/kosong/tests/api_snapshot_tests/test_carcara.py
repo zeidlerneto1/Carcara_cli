@@ -21,10 +21,7 @@ def _has_meaningful_content(content) -> bool:
     if isinstance(content, str):
         return bool(content)
     if isinstance(content, list):
-        return any(
-            not (isinstance(part, dict) and part.get("type") == "think")
-            for part in content
-        )
+        return any(not (isinstance(part, dict) and part.get("type") == "think") for part in content)
     return bool(content)
 
 
@@ -164,9 +161,7 @@ async def test_carcara_last_message_assistant_think_only():
         # so the assistant message carries a non-empty tail.
         if last["role"] == "assistant":
             assert last.get("content")
-        print(
-            "[assistant_think_only] serialized messages:"
-        )
+        print("[assistant_think_only] serialized messages:")
         print(json.dumps(body["messages"], indent=2, ensure_ascii=False))
 
 
@@ -197,9 +192,7 @@ async def test_carcara_last_message_assistant_empty_text():
         # The provider cannot repair an empty assistant tail — it stays empty
         # on the wire. The CLI-layer guard (test_sanitize_history) must drop it.
         assert last == {"role": "assistant", "content": ""}
-        print(
-            "[assistant_empty_text] serialized messages:"
-        )
+        print("[assistant_empty_text] serialized messages:")
         print(json.dumps(body["messages"], indent=2, ensure_ascii=False))
 
 
@@ -284,8 +277,12 @@ async def test_carcara_mid_history_think_only_with_tool_calls_drops_content():
     (the model answered with reasoning, then emitted a tool call), the previous
     serialization produced::
 
-        {"role": "assistant", "content": [{"type": "think", "think": "..."}],
-         "reasoning_content": "...", "tool_calls": [...]}
+        {
+            "role": "assistant",
+            "content": [{"type": "think", "think": "..."}],
+            "reasoning_content": "...",
+            "tool_calls": [...],
+        }
 
     The ``content`` list still held the think part because the code only rebuilt
     ``content`` when there were NON-think parts; the original dump (with the
@@ -335,3 +332,119 @@ async def test_carcara_mid_history_think_only_with_tool_calls_drops_content():
             {"role": "tool", "content": "done", "tool_call_id": "call_mid"},
             {"role": "user", "content": "Continue"},
         ], f"server-400 repro: unexpected serialization: {messages!r}"
+
+
+async def test_carcara_generation_kwargs_applied_to_body():
+    """generation_kwargs passed at construction are serialized into the body."""
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(
+            return_value=Response(200, json=make_chat_completion_response())
+        )
+        provider = CarcaraProvider(
+            model="m",
+            base_url=BASE_URL,
+            stream=False,
+            generation_kwargs={"temperature": 0.6, "top_p": 0.9, "min_p": 0.05},
+        )
+        async for _ in await provider.generate("", [], [Message(role="user", content="Hi")]):
+            pass
+        body = json.loads(mock.calls.last.request.content.decode())
+        assert body["temperature"] == 0.6
+        assert body["top_p"] == 0.9
+        assert body["min_p"] == 0.05
+
+
+async def test_carcara_with_generation_kwargs_merges_and_overrides(monkeypatch):
+    """with_generation_kwargs merges over env vars and returns a new instance."""
+    monkeypatch.setenv("CARCARA_TEMPERATURE", "1.0")
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(
+            return_value=Response(200, json=make_chat_completion_response())
+        )
+        provider = CarcaraProvider(model="m", base_url=BASE_URL, stream=False)
+        assert provider.model_parameters["temperature"] == 1.0
+        updated = provider.with_generation_kwargs(temperature=0.3, top_p=0.8)
+        # The original instance is not mutated.
+        assert provider.model_parameters["temperature"] == 1.0
+        assert updated is not provider
+        async for _ in await updated.generate("", [], [Message(role="user", content="Hi")]):
+            pass
+        body = json.loads(mock.calls.last.request.content.decode())
+        assert body["temperature"] == 0.3
+        assert body["top_p"] == 0.8
+
+
+async def test_carcara_generation_overrides_override_kwargs():
+    """Request-scoped generation_overrides take precedence over base kwargs."""
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(
+            return_value=Response(200, json=make_chat_completion_response())
+        )
+        provider = CarcaraProvider(
+            model="m",
+            base_url=BASE_URL,
+            stream=False,
+            generation_kwargs={"max_completion_tokens": 1000},
+        )
+        async for _ in await provider.generate(
+            "",
+            [],
+            [Message(role="user", content="Hi")],
+            generation_overrides={"max_completion_tokens": 4096},
+        ):
+            pass
+        body = json.loads(mock.calls.last.request.content.decode())
+        assert body["max_completion_tokens"] == 4096
+
+
+async def test_carcara_thinking_budget_override():
+    """A configured thinking_budget_tokens overrides the default effort budget."""
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(
+            return_value=Response(200, json=make_chat_completion_response())
+        )
+        provider = CarcaraProvider(
+            model="m",
+            base_url=BASE_URL,
+            stream=False,
+            generation_kwargs={"thinking_budget_tokens": 4096},
+        )
+        provider = provider.with_thinking("high")  # default high budget is 8192
+        async for _ in await provider.generate("", [], [Message(role="user", content="Hi")]):
+            pass
+        body = json.loads(mock.calls.last.request.content.decode())
+        assert body["chat_template_kwargs"] == {"enable_thinking": True}
+        assert body["thinking_budget_tokens"] == 4096
+
+
+async def test_carcara_backend_sampling_applied():
+    """backend_sampling from config is applied as a boolean in the body."""
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.post("/chat/completions").mock(
+            return_value=Response(200, json=make_chat_completion_response())
+        )
+        provider = CarcaraProvider(
+            model="m",
+            base_url=BASE_URL,
+            stream=False,
+            generation_kwargs={"backend_sampling": True},
+        )
+        async for _ in await provider.generate("", [], [Message(role="user", content="Hi")]):
+            pass
+        body = json.loads(mock.calls.last.request.content.decode())
+        assert body["backend_sampling"] is True
+
+
+def test_carcara_model_parameters_reflect_kwargs():
+    """model_parameters surfaces the effective generation kwargs."""
+    provider = CarcaraProvider(
+        model="m",
+        base_url=BASE_URL,
+        stream=False,
+        generation_kwargs={"temperature": 0.7, "max_completion_tokens": 2048},
+    )
+    params = provider.model_parameters
+    assert params["temperature"] == 0.7
+    assert params["max_completion_tokens"] == 2048
+    assert params["model"] == "m"
+    assert params["base_url"] == BASE_URL

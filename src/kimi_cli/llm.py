@@ -162,12 +162,38 @@ def find_kimi_provider(chat_provider: ChatProvider) -> Kimi | None:
     return provider if isinstance(provider, Kimi) else None
 
 
+def find_generation_override_provider(chat_provider: ChatProvider) -> Any | None:
+    """Return a provider that supports request-scoped ``generation_overrides``.
+
+    Recognizes both Kimi-backed providers and the ``CarcaraProvider``. Returns
+    ``None`` for providers that cannot consume per-request generation overrides.
+    """
+    from kosong.contrib.chat_provider.carcara import CarcaraProvider
+
+    kimi = find_kimi_provider(chat_provider)
+    if kimi is not None:
+        return kimi
+    provider: Any = chat_provider
+    # Unwrap known request/trace wrappers (bounded loop: MagicMock-based providers
+    # in tests always answer hasattr(..., "_provider") truthily, so a while loop
+    # would never terminate).
+    for _ in range(10):
+        inner = getattr(provider, "_provider", None)
+        if inner is None or inner is provider:
+            break
+        provider = inner
+    return provider if isinstance(provider, CarcaraProvider) else None
+
+
 def with_kimi_generation_overrides(
     chat_provider: ChatProvider,
     generation_overrides: Mapping[str, Any] | None,
 ) -> ChatProvider:
-    """Apply request-scoped generation overrides only to Kimi-backed providers."""
-    if not generation_overrides or find_kimi_provider(chat_provider) is None:
+    """Apply request-scoped generation overrides to supported providers.
+
+    Currently applies to Kimi-backed providers and the ``CarcaraProvider``.
+    """
+    if not generation_overrides or find_generation_override_provider(chat_provider) is None:
         return chat_provider
     return _KimiRequestChatProvider(chat_provider, dict(generation_overrides))
 
@@ -204,9 +230,7 @@ def estimate_static_tokens(system_prompt: str, tools: Sequence[Tool]) -> int:
     it via ``estimate_request_tokens(..., static_tokens=...)`` to avoid re-serializing
     every tool schema (``json.dumps``) on each step.
     """
-    return _estimate_text_tokens(system_prompt) + sum(
-        _estimate_tool_tokens(tool) for tool in tools
-    )
+    return _estimate_text_tokens(system_prompt) + sum(_estimate_tool_tokens(tool) for tool in tools)
 
 
 def estimate_request_tokens(
@@ -428,13 +452,21 @@ def create_llm(
         case "carcara":
             from kosong.contrib.chat_provider.carcara import CarcaraProvider
 
-            chat_provider = CarcaraProvider(
+            carcara_provider = CarcaraProvider(
                 model=model.model,
                 base_url=provider.base_url,
                 api_key=resolved_api_key,
                 reasoning_key=provider.reasoning_key or "reasoning_content",
                 default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
             )
+            chat_provider = cast(ChatProvider, carcara_provider)
+            if model.generation is not None:
+                carcara_gen_kwargs: dict[str, Any] = model.generation.model_dump(exclude_none=True)
+                if carcara_gen_kwargs:
+                    chat_provider = cast(
+                        ChatProvider,
+                        carcara_provider.with_generation_kwargs(**carcara_gen_kwargs),
+                    )
         case "anthropic":
             from kosong.contrib.chat_provider.anthropic import Anthropic
 
