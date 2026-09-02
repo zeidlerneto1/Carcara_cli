@@ -1024,6 +1024,8 @@ def login_carcara(
     from rich.console import Console
 
     from kimi_cli.auth.carcara import (
+        CARCARA_LOGIN_DISABLED_MSG,
+        CARCARA_LOGIN_ENABLED,
         DEFAULT_DOMAIN,
         CarcaraLoginError,
         login_carcara,
@@ -1032,6 +1034,10 @@ def login_carcara(
     from kimi_cli.config import load_config
 
     console = Console()
+
+    if not CARCARA_LOGIN_ENABLED:
+        console.print(f"[red]{CARCARA_LOGIN_DISABLED_MSG}[/red]")
+        raise typer.Exit(code=1)
 
     config = load_config()
     resolved_base_url: str = base_url

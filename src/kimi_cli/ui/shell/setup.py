@@ -216,12 +216,18 @@ def reload(app: Shell, args: str):
 async def carcara_login(app: Shell, args: str) -> None:
     """Login to the Carcará service and store the session."""
     from kimi_cli.auth.carcara import (
+        CARCARA_LOGIN_DISABLED_MSG,
+        CARCARA_LOGIN_ENABLED,
         DEFAULT_DOMAIN,
         CarcaraLoginError,
         login_carcara,
         save_carcara_session,
     )
     from kimi_cli.cli import Reload
+
+    if not CARCARA_LOGIN_ENABLED:
+        console.print(f"[red]{CARCARA_LOGIN_DISABLED_MSG}[/red]")
+        return
 
     config = load_config()
     default_base_url = next(
