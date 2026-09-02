@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from kimi_cli.utils.io import atomic_json_write
 from kimi_cli.utils.logging import logger
 
 if TYPE_CHECKING:
@@ -139,15 +140,15 @@ def _write_cache(cache_key: str, model_ids: set[str]) -> None:
     try:
         path = _cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {
-                    "key": cache_key,
-                    "ts": time.time(),
-                    "model_ids": sorted(model_ids),
-                }
-            ),
-            encoding="utf-8",
+        # Atomic write prevents corruption if the process crashes mid-write;
+        # also avoids torn files when multiple CLI processes write concurrently.
+        atomic_json_write(
+            {
+                "key": cache_key,
+                "ts": time.time(),
+                "model_ids": sorted(model_ids),
+            },
+            path,
         )
     except OSError as exc:
         logger.debug("Model fallback: failed to write availability cache: {error}", error=exc)
