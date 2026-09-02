@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from kimi_cli.auth.carcara import (
+    CARCARA_LOGIN_DISABLED_MSG,
     CarcaraLoginError,
     CarcaraSession,
     _extract_phpsessid,
@@ -24,7 +25,12 @@ def test_origin_derives_host_root() -> None:
     assert _origin("http://example.com:8080/foo/bar") == "http://example.com:8080"
 
 
+def _enable_login(monkeypatch) -> None:
+    monkeypatch.setattr("kimi_cli.auth.carcara.CARCARA_LOGIN_ENABLED", True)
+
+
 def test_session_roundtrip(tmp_path, monkeypatch) -> None:
+    _enable_login(monkeypatch)
     monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
     session = CarcaraSession(
         base_url=BASE_URL,
@@ -47,6 +53,7 @@ def test_session_roundtrip(tmp_path, monkeypatch) -> None:
 
 
 def test_delete_session(tmp_path, monkeypatch) -> None:
+    _enable_login(monkeypatch)
     monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
     session = CarcaraSession(
         base_url=BASE_URL,
@@ -69,6 +76,7 @@ def test_extract_phpsessid() -> None:
 
 
 def test_login_carcara_success(tmp_path, monkeypatch) -> None:
+    _enable_login(monkeypatch)
     monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
 
     login_response = MagicMock()
@@ -96,6 +104,7 @@ def test_login_carcara_success(tmp_path, monkeypatch) -> None:
 
 
 def test_login_carcara_bad_status(tmp_path, monkeypatch) -> None:
+    _enable_login(monkeypatch)
     monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
 
     login_response = MagicMock()
@@ -114,6 +123,7 @@ def test_login_carcara_bad_status(tmp_path, monkeypatch) -> None:
 
 
 def test_login_carcara_missing_cookie(tmp_path, monkeypatch) -> None:
+    _enable_login(monkeypatch)
     monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
 
     login_response = MagicMock()
@@ -127,3 +137,37 @@ def test_login_carcara_missing_cookie(tmp_path, monkeypatch) -> None:
     )
     with pytest.raises(CarcaraLoginError):
         login_carcara(BASE_URL, "alice", "secret", "LNCC")
+
+
+# --- Disabled (dev/test) behaviour ---
+
+
+def test_login_carcara_disabled_by_default(monkeypatch) -> None:
+    """With the feature flag off, login must refuse without hitting the network."""
+    monkeypatch.setattr(
+        "kimi_cli.auth.carcara.httpx.post",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not call network")),
+    )
+    with pytest.raises(CarcaraLoginError) as excinfo:
+        login_carcara(BASE_URL, "alice", "secret", "LNCC")
+    assert CARCARA_LOGIN_DISABLED_MSG in str(excinfo.value)
+
+
+def test_load_carcara_session_disabled_returns_none(tmp_path, monkeypatch) -> None:
+    """Even with a persisted session, load must return None when disabled."""
+    # Persist a session first (requires the flag to be on).
+    _enable_login(monkeypatch)
+    monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
+    session = CarcaraSession(
+        base_url=BASE_URL,
+        user="alice",
+        domain="LNCC",
+        phpsessid="abc123",
+    )
+    save_carcara_session(session)
+    assert load_carcara_session(BASE_URL) is not None
+
+    # Now turn the flag off: load must refuse to return a session.
+    monkeypatch.setattr("kimi_cli.auth.carcara.CARCARA_LOGIN_ENABLED", False)
+    assert load_carcara_session(BASE_URL) is None
+    assert load_carcara_session() is None

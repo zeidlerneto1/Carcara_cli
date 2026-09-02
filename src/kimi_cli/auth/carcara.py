@@ -32,6 +32,13 @@ LOGIN_PATH = "/apps/login/action/loginAction.php"
 # Default domain used by the Carcará web app.
 DEFAULT_DOMAIN = "LNCC"
 
+# Whether the Carcara login is enabled. Disabled on the dev branch because the
+# login flow is still a test/experimental feature.
+CARCARA_LOGIN_ENABLED = False
+
+# Message shown when someone tries to log in while the login is disabled.
+CARCARA_LOGIN_DISABLED_MSG = "Login Carcará desabilitado nesta versão de teste (branch dev)."
+
 # Extra browser-like headers the login endpoint expects. The base browser headers
 # come from CarcaraProvider.DEFAULT_HEADERS (mirrored by _carcara_browser_headers).
 LOGIN_HEADERS = {
@@ -145,6 +152,9 @@ def login_carcara(
     Raises:
         CarcaraLoginError: if the login or the follow-up session validation fails.
     """
+    if not CARCARA_LOGIN_ENABLED:
+        raise CarcaraLoginError(CARCARA_LOGIN_DISABLED_MSG)
+
     base_url = base_url.rstrip("/")
     origin = _origin(base_url)
     login_url = f"{origin}{LOGIN_PATH}"
@@ -240,6 +250,8 @@ def load_carcara_session(base_url: str | None = None) -> CarcaraSession | None:
     When ``base_url`` is ``None`` the first session found in the credentials
     directory is returned (useful for the default single-endpoint setup).
     """
+    if not CARCARA_LOGIN_ENABLED:
+        return None
     if base_url is not None:
         return _load_from_file(base_url)
     directory = _credentials_dir()
