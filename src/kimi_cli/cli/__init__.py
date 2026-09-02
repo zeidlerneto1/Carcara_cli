@@ -1006,6 +1006,112 @@ def logout(
         raise typer.Exit(code=1)
 
 
+@cli.command()
+def login_carcara(
+    user: str = typer.Option(None, "--user", "-u", help="Carcara username."),
+    password: str = typer.Option(None, "--password", "-p", help="Carcara password (hidden)."),
+    domain: str = typer.Option(None, "--domain", "-d", help="Carcara domain (default LNCC)."),
+    base_url: str = typer.Option(
+        None,
+        "--base-url",
+        help="Carcara base URL (defaults to the configured provider URL).",
+    ),
+) -> None:
+    """Login to the Carcara service and store the session."""
+    import asyncio
+    import getpass
+
+    from rich.console import Console
+
+    from kimi_cli.auth.carcara import (
+        DEFAULT_DOMAIN,
+        CarcaraLoginError,
+        login_carcara,
+        save_carcara_session,
+    )
+    from kimi_cli.config import load_config
+
+    console = Console()
+
+    config = load_config()
+    resolved_base_url: str = base_url
+    if not resolved_base_url:
+        resolved_base_url = next(
+            (
+                provider.base_url
+                for provider in config.providers.values()
+                if provider.type == "carcara" and provider.base_url
+            ),
+            "",
+        )
+    if not resolved_base_url:
+        resolved_base_url = typer.prompt(
+            "Carcara base URL", default="https://carcara.sinapad.lncc.br/service/v1"
+        )
+
+    user = user or typer.prompt("Username")
+    password = password or getpass.getpass("Password: ")
+    domain = domain or DEFAULT_DOMAIN
+
+    with console.status("[cyan]Logging in to Carcara...[/cyan]"):
+        try:
+            session = login_carcara(resolved_base_url, user, password, domain)
+            save_carcara_session(session)
+        except CarcaraLoginError as e:
+            console.print(f"[red]Login failed: {e}[/red]")
+            raise typer.Exit(code=1) from None
+
+    console.print(f"[green]OK[/green] Logged in as {user} ({domain}).")
+
+    # Re-sync the model list now that we have a valid session (removes models
+    # that are no longer served, e.g. stale entries left in config).
+    from kimi_cli.auth.platforms import refresh_carcara_models
+
+    async def _refresh() -> bool:
+        return await refresh_carcara_models(load_config())
+
+    changed = asyncio.run(_refresh())
+    if changed:
+        console.print("[green]OK[/green] Model list refreshed.")
+    else:
+        console.print("[yellow]Model list unchanged.[/yellow]")
+
+
+@cli.command()
+def logout_carcara(
+    base_url: str = typer.Option(
+        None,
+        "--base-url",
+        help="Carcara base URL to log out of (defaults to the configured provider URL).",
+    ),
+) -> None:
+    """Remove the saved Carcara session."""
+    from rich.console import Console
+
+    from kimi_cli.auth.carcara import delete_carcara_session
+    from kimi_cli.config import load_config
+
+    console = Console()
+
+    config = load_config()
+    resolved_base_url: str = base_url
+    if not resolved_base_url:
+        resolved_base_url = next(
+            (
+                provider.base_url
+                for provider in config.providers.values()
+                if provider.type == "carcara" and provider.base_url
+            ),
+            "",
+        )
+
+    removed = delete_carcara_session(resolved_base_url)
+    if removed:
+        console.print("[green]OK[/green] Carcara session removed.")
+    else:
+        console.print("[yellow]No Carcara session found.[/yellow]")
+
+
 @cli.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def term(
     ctx: typer.Context,

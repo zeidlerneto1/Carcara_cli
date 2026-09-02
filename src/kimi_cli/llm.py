@@ -452,13 +452,26 @@ def create_llm(
         case "carcara":
             from kosong.contrib.chat_provider.carcara import CarcaraProvider
 
-            carcara_provider = CarcaraProvider(
-                model=model.model,
-                base_url=provider.base_url,
-                api_key=resolved_api_key,
-                reasoning_key=provider.reasoning_key or "reasoning_content",
-                default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
-            )
+            carcara_kwargs: dict[str, Any] = {
+                "model": model.model,
+                "base_url": provider.base_url,
+                "api_key": resolved_api_key,
+                "reasoning_key": provider.reasoning_key or "reasoning_content",
+            }
+            if provider.custom_headers:
+                carcara_kwargs["default_headers"] = dict(provider.custom_headers)
+            # Inject a saved Carcará session cookie so /chat/completions is authorized.
+            try:
+                from kimi_cli.auth.carcara import load_carcara_session
+
+                session = load_carcara_session(provider.base_url)
+                if session and session.phpsessid:
+                    carcara_kwargs["cookies"] = {"PHPSESSID": session.phpsessid}
+            except Exception:
+                # A stale/broken session must not prevent constructing the provider.
+                pass
+
+            carcara_provider = CarcaraProvider(**carcara_kwargs)
             chat_provider = cast(ChatProvider, carcara_provider)
             if model.generation is not None:
                 carcara_gen_kwargs: dict[str, Any] = model.generation.model_dump(exclude_none=True)

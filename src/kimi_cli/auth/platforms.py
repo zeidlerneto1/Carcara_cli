@@ -401,12 +401,21 @@ async def list_carcara_models(
     with id/context_length/max_input_tokens/max_output_tokens.
     """
     models_url = f"{base_url.rstrip('/')}/models"
+    cookies: dict[str, str] | None = None
+    try:
+        from kimi_cli.auth.carcara import load_carcara_session
+
+        session = load_carcara_session(base_url)
+        if session and session.phpsessid:
+            cookies = {"PHPSESSID": session.phpsessid}
+    except Exception:
+        cookies = None
     try:
         async with httpx.AsyncClient(
             headers=_carcara_browser_headers(api_key),
             timeout=httpx.Timeout(30.0, connect=10.0),
         ) as client:
-            response = await client.get(models_url)
+            response = await client.get(models_url, cookies=cookies)
             response.raise_for_status()
             payload = response.json()
     except httpx.HTTPStatusError as exc:
@@ -507,6 +516,18 @@ def _apply_carcara_models(
             display_name=info.display_name,
         )
         changed = True
+
+    # Remove stale entries whose backing model id is no longer served by the
+    # endpoint (e.g. a model that was retired on the server). This keeps the
+    # configured model list in sync with reality.
+    available_ids = {info.id for info in models}
+    if available_ids:
+        for key, model_cfg in list(config.models.items()):
+            if model_cfg.provider != provider_key:
+                continue
+            if model_cfg.model not in available_ids:
+                del config.models[key]
+                changed = True
 
     if config.default_model and config.default_model not in config.models:
         config.default_model = next(iter(config.models), "")

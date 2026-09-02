@@ -210,3 +210,67 @@ def reload(app: Shell, args: str):
     from kimi_cli.cli import Reload
 
     raise Reload
+
+
+@registry.command(name="carcara-login")
+async def carcara_login(app: Shell, args: str) -> None:
+    """Login to the Carcará service and store the session."""
+    from kimi_cli.auth.carcara import (
+        DEFAULT_DOMAIN,
+        CarcaraLoginError,
+        login_carcara,
+        save_carcara_session,
+    )
+    from kimi_cli.cli import Reload
+
+    config = load_config()
+    default_base_url = next(
+        (
+            provider.base_url
+            for provider in config.providers.values()
+            if provider.type == "carcara" and provider.base_url
+        ),
+        "https://carcara.sinapad.lncc.br/service/v1",
+    )
+
+    base_url = await _prompt_text("Carcará base URL", is_password=False)
+    base_url = base_url or default_base_url
+
+    user = await _prompt_text("Username")
+    if not user:
+        return
+    password = await _prompt_text("Password", is_password=True)
+    if not password:
+        return
+    domain = await _prompt_text("Domain (default LNCC)")
+    domain = domain or DEFAULT_DOMAIN
+
+    with console.status("[cyan]Logging in to Carcará...[/cyan]"):
+        try:
+            session = login_carcara(base_url, user, password, domain)
+            save_carcara_session(session)
+        except CarcaraLoginError as e:
+            console.print(f"[red]Login failed: {e}[/red]")
+            return
+
+    console.print(f"[green]✓ Logged in as {user} ({domain})[/green]")
+
+    from kimi_cli.auth.platforms import refresh_carcara_models
+
+    await refresh_carcara_models(load_config())
+    console.print("[green]✓ Model list refreshed.[/green]")
+    raise Reload
+
+
+@registry.command(name="carcara-logout")
+async def carcara_logout(app: Shell, args: str) -> None:
+    """Remove the saved Carcará session."""
+    from kimi_cli.auth.carcara import delete_carcara_session
+    from kimi_cli.cli import Reload
+
+    removed = delete_carcara_session()
+    if removed:
+        console.print("[green]✓ Carcará session removed.[/green]")
+    else:
+        console.print("[yellow]No Carcará session found.[/yellow]")
+    raise Reload
