@@ -30,6 +30,7 @@ class TestSessionState:
         assert state.custom_title is None
         assert state.title_generated is False
         assert state.title_generate_attempts == 0
+        assert state.friendly_name is None
 
     def test_save_and_load_roundtrip(self, state_dir: Path):
         state_dir.mkdir(parents=True)
@@ -102,6 +103,26 @@ class TestSessionState:
         assert loaded.custom_title == "My Session"
         assert loaded.title_generated is True
         assert loaded.title_generate_attempts == 1
+
+    def test_friendly_name_roundtrip(self, state_dir: Path):
+        """friendly_name persists through save/load."""
+        state_dir.mkdir(parents=True)
+        state = SessionState(friendly_name="analisa-sessoes-captain")
+        save_session_state(state, state_dir)
+
+        loaded = load_session_state(state_dir)
+        assert loaded.friendly_name == "analisa-sessoes-captain"
+
+    def test_friendly_name_default_none(self, state_dir: Path):
+        """Old state.json without friendly_name loads with None default."""
+        state_dir.mkdir(parents=True)
+        state_file = state_dir / "state.json"
+        state_file.write_text(
+            json.dumps({"version": 1, "approval": {"yolo": False, "auto_approve_actions": []}}),
+            encoding="utf-8",
+        )
+        loaded = load_session_state(state_dir)
+        assert loaded.friendly_name is None
 
     def test_migrate_legacy_metadata(self, state_dir: Path):
         """Legacy metadata.json fields are migrated into state.json on load."""

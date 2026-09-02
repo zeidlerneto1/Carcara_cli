@@ -108,7 +108,11 @@ class SessionPickerApp:
         values: list[tuple[str, str]] = []
         for session in self._sessions:
             time_str = format_relative_time(session.updated_at)
-            short_id = session.id[:8]
+            # Prefer the stable human-readable friendly name when available;
+            # fall back to a short id prefix for legacy sessions.
+            short_id = (
+                session.state.friendly_name if session.state.friendly_name else session.id[:8]
+            )
             marker = " (current)" if session.id == current_id else ""
 
             title_line = f"{session.title}{marker}"

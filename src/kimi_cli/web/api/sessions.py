@@ -339,6 +339,7 @@ async def create_session(request: CreateSessionRequest | None = None) -> Session
     return Session(
         session_id=UUID(kimi_cli_session.id),
         title=kimi_cli_session.title,
+        friendly_name=kimi_cli_session.state.friendly_name,
         last_updated=datetime.fromtimestamp(context_file.stat().st_mtime, tz=UTC),
         is_running=False,
         status=SessionStatus(
@@ -730,6 +731,7 @@ async def fork_session_endpoint(
     return Session(
         session_id=UUID(new_session_id),
         title=fork_title,
+        friendly_name=new_state.friendly_name,
         last_updated=datetime.fromtimestamp(context_file.stat().st_mtime, tz=UTC),
         is_running=False,
         status=SessionStatus(

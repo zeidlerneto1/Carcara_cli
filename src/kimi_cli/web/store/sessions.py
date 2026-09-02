@@ -170,6 +170,7 @@ def _build_joint_session(entry: SessionIndexEntry) -> JointSession:
     return JointSession(
         session_id=entry.session_id,
         title=entry.title,
+        friendly_name=entry.state.friendly_name,
         last_updated=entry.last_updated,
         is_running=False,
         status=None,

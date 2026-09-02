@@ -66,6 +66,9 @@ class Session(BaseModel):
 
     session_id: UUID = Field(..., description="Session unique ID")
     title: str = Field(..., description="Session title derived from kimi-cli history")
+    friendly_name: str | None = Field(
+        default=None, description="Stable human-readable name correlated with the topic"
+    )
     last_updated: datetime = Field(..., description="Last updated timestamp")
     is_running: bool = Field(default=False, description="Whether the session is running")
     status: SessionStatus | None = Field(default=None, description="Session runtime status")
