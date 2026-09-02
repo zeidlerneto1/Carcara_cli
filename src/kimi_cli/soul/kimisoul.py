@@ -792,6 +792,22 @@ class KimiSoul:
                             fresh.custom_title = title
                             save_session_state(fresh, session.dir)
                         session.state.custom_title = fresh.custom_title
+
+                # Auto-set a stable, human-readable friendly name on the first
+                # real turn, correlated with the topic of the conversation.
+                if session.state.friendly_name is None:
+                    from kimi_cli.session_state import (
+                        load_session_state,
+                        save_session_state,
+                    )
+                    from kimi_cli.tools.session_name import generate_session_name
+
+                    fresh = load_session_state(session.dir)
+                    if fresh.friendly_name is None:
+                        first_text = Message(role="user", content=user_input).extract_text(" ")
+                        fresh.friendly_name = generate_session_name(first_text, session.id)
+                        save_session_state(fresh, session.dir)
+                    session.state.friendly_name = fresh.friendly_name
         except MaxStepsReached:
             interrupt_reason = "max_steps"
             raise
