@@ -258,11 +258,11 @@ class Runtime:
             session.state.additional_dirs = valid_dir_strs
             session.save_state()
 
-        # Format additional dirs info for system prompt
+        # Format additional dirs info for system prompt (in parallel)
         additional_dirs_info = ""
         if additional_dirs:
-            parts: list[str] = []
-            for d in additional_dirs:
+
+            async def _list_dir(d: KaosPath) -> str:
                 try:
                     dir_ls = await list_directory(d)
                 except OSError:
@@ -270,7 +270,9 @@ class Runtime:
                         "Cannot list additional directory, skipping listing: {dir}", dir=d
                     )
                     dir_ls = "[directory not readable]"
-                parts.append(f"### `{d}`\n\n```\n{dir_ls}\n```")
+                return f"### `{d}`\n\n```\n{dir_ls}\n```"
+
+            parts = await asyncio.gather(*(_list_dir(d) for d in additional_dirs))
             additional_dirs_info = "\n\n".join(parts)
 
         # Merge invocation flags with persisted session state.
@@ -409,27 +411,35 @@ async def load_agent(
     )
 
     # Register built-in subagent types before loading tools because some tools render
-    # descriptions from the labor market on initialization.
-    for subagent_name, subagent_spec in agent_spec.subagents.items():
-        logger.debug(
-            "Registering builtin subagent type: {subagent_name}", subagent_name=subagent_name
+    # descriptions from the labor market on initialization. Load subagent specs in
+    # parallel since each does its own YAML parse + file I/O.
+    if agent_spec.subagents:
+        subagent_paths = list(agent_spec.subagents.values())
+        specs = await asyncio.gather(
+            *(asyncio.to_thread(load_agent_spec, sp.path) for sp in subagent_paths)
         )
-        builtin_spec = load_agent_spec(subagent_spec.path)
-        tool_policy = (
-            ToolPolicy(mode="allowlist", tools=tuple(builtin_spec.allowed_tools))
-            if builtin_spec.allowed_tools is not None
-            else ToolPolicy(mode="inherit")
-        )
-        runtime.labor_market.add_builtin_type(
-            AgentTypeDefinition(
-                name=subagent_name,
-                description=subagent_spec.description,
-                agent_file=subagent_spec.path,
-                when_to_use=builtin_spec.when_to_use,
-                default_model=builtin_spec.model,
-                tool_policy=tool_policy,
+        for (subagent_name, subagent_spec), builtin_spec in zip(
+            agent_spec.subagents.items(), specs, strict=True
+        ):
+            logger.debug(
+                "Registering builtin subagent type: {subagent_name}",
+                subagent_name=subagent_name,
             )
-        )
+            tool_policy = (
+                ToolPolicy(mode="allowlist", tools=tuple(builtin_spec.allowed_tools))
+                if builtin_spec.allowed_tools is not None
+                else ToolPolicy(mode="inherit")
+            )
+            runtime.labor_market.add_builtin_type(
+                AgentTypeDefinition(
+                    name=subagent_name,
+                    description=subagent_spec.description,
+                    agent_file=subagent_spec.path,
+                    when_to_use=builtin_spec.when_to_use,
+                    default_model=builtin_spec.model,
+                    tool_policy=tool_policy,
+                )
+            )
 
     toolset = KimiToolset()
     tool_deps = {

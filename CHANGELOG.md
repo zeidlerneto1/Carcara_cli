@@ -11,6 +11,9 @@ Only write entries that are worth mentioning to users.
 
 ## Unreleased
 
+- Performance: Reduce model-fallback availability probe timeout from 8s to 3s and cache probe results on disk for 1 hour — subsequent CLI startups skip the network round-trip entirely
+- Performance: Reduce Carcara HTTP timeout from 60s to 30s so slow/unresponsive servers no longer stall responses for a full minute
+- Performance: Load builtin subagent specs in parallel and list additional directories concurrently during startup
 - Model fallback: Automatically detect when the current model is no longer available on its provider endpoint and switch to the first available model of the same provider. The check runs at startup (before the first prompt) and on a 404 "model not found" error during a turn; the new default model is persisted to `config.toml` and the user is shown a notice with the working model name.
 - Carcará: Fix history ending in an assistant message with only reasoning content (`reasoning_content` / `ThinkPart`) or empty text causing `400 {"error":"Last message must be from user or tool."}` — added `sanitize_history()` (soul layer) to drop invalid tails and provider-side tail repair (wire layer) that promotes reasoning into visible content
 - Carcará: Fix `400 {"error":"unsupported content[].type"}` when a non-tail assistant message carried only a `ThinkPart` (plus a tool call) — the leftover `content: [{"type": "think", ...}]` list is now dropped during serialization, keeping only `reasoning_content` and `tool_calls`

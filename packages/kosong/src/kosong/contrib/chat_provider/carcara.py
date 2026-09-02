@@ -164,7 +164,7 @@ class CarcaraProvider:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 headers=self._headers,
-                timeout=httpx.Timeout(60.0, connect=10.0),
+                timeout=httpx.Timeout(30.0, connect=10.0),
                 **self._client_kwargs,
             )
         return self._client

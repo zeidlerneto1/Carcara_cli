@@ -405,3 +405,97 @@ async def test_try_model_fallback_no_alternative(runtime: Runtime, tmp_path: Pat
         switched = await soul._try_model_fallback(exc)
     assert switched is False
     assert getattr(soul, "_model_fallback_attempted", False) is False
+
+
+class TestAvailabilityCache:
+    """Tests for the on-disk model availability cache."""
+
+    def test_cache_key_stable(self):
+        """The cache key is deterministic and different for different providers."""
+        k1 = mf._cache_key("p1", "http://a", "key1")
+        k2 = mf._cache_key("p1", "http://a", "key1")
+        k3 = mf._cache_key("p2", "http://a", "key1")
+        assert k1 == k2
+        assert k1 != k3
+
+    def test_cache_roundtrip(self, tmp_path):
+        """Writing then reading returns the same model ids."""
+        key = "testkey123"
+        with patch.object(mf, "_cache_path", return_value=tmp_path / "cache.json"):
+            mf._write_cache(key, {"model-a", "model-b"})
+            result = mf._read_cache(key)
+        assert result == {"model-a", "model-b"}
+
+    def test_cache_miss_on_wrong_key(self, tmp_path):
+        """Reading with a different key returns None."""
+        with patch.object(mf, "_cache_path", return_value=tmp_path / "cache.json"):
+            mf._write_cache("keyA", {"model-a"})
+            assert mf._read_cache("keyB") is None
+
+    def test_cache_miss_when_expired(self, tmp_path):
+        """Reading an expired cache entry returns None."""
+        key = "testkey123"
+        with patch.object(mf, "_cache_path", return_value=tmp_path / "cache.json"):
+            mf._write_cache(key, {"model-a"})
+            # Manually backdate the timestamp to force expiry.
+            import json as _json
+
+            path = tmp_path / "cache.json"
+            data = _json.loads(path.read_text(encoding="utf-8"))
+            data["ts"] = data["ts"] - mf.MODEL_FALLBACK_CACHE_TTL_S - 10
+            path.write_text(_json.dumps(data), encoding="utf-8")
+            assert mf._read_cache(key) is None
+
+    def test_cache_missing_file(self, tmp_path):
+        """Reading a nonexistent cache file returns None."""
+        with patch.object(mf, "_cache_path", return_value=tmp_path / "nonexistent.json"):
+            assert mf._read_cache("anykey") is None
+
+    def test_cache_corrupt_file(self, tmp_path):
+        """Reading a corrupt cache file returns None rather than raising."""
+        path = tmp_path / "cache.json"
+        path.write_text("not json at all", encoding="utf-8")
+        with patch.object(mf, "_cache_path", return_value=path):
+            assert mf._read_cache("anykey") is None
+
+    @pytest.mark.asyncio
+    async def test_list_provider_available_aliases_uses_cache(self, tmp_path):
+        """When the cache is fresh, no network probe happens."""
+        config = _make_config(
+            models={
+                "a": LLMModel(provider="p", model="model-a", max_context_size=1024),
+                "b": LLMModel(provider="p", model="model-b", max_context_size=2048),
+            },
+            providers={
+                "p": LLMProvider(type="carcara", base_url="http://x", api_key=SecretStr(""))
+            },
+        )
+        key = mf._cache_key("p", "http://x", "")
+        with patch.object(mf, "_cache_path", return_value=tmp_path / "cache.json"):
+            mf._write_cache(key, {"model-a", "model-b"})
+            with patch.object(mf, "_list_provider_model_ids", new=AsyncMock()) as mock_probe:
+                result = await mf.list_provider_available_aliases("p", config)
+        assert result == ["a", "b"]
+        mock_probe.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_provider_available_aliases_writes_cache(self, tmp_path):
+        """After a successful network probe, the cache is populated."""
+        config = _make_config(
+            models={
+                "a": LLMModel(provider="p", model="model-a", max_context_size=1024),
+                "b": LLMModel(provider="p", model="model-b", max_context_size=2048),
+            },
+            providers={
+                "p": LLMProvider(type="carcara", base_url="http://x", api_key=SecretStr(""))
+            },
+        )
+        key = mf._cache_key("p", "http://x", "")
+        with patch.object(mf, "_cache_path", return_value=tmp_path / "cache.json"):
+            with patch.object(
+                mf, "_list_provider_model_ids", new=AsyncMock(return_value={"model-a", "model-b"})
+            ):
+                result = await mf.list_provider_available_aliases("p", config)
+            # Cache should now be populated.
+            assert mf._read_cache(key) == {"model-a", "model-b"}
+        assert result == ["a", "b"]
