@@ -24,6 +24,7 @@ datas = (
             "prompts/**/*.md",
             "skills/**",
             "tools/**/*.md",
+            "ui/shell/*.png",
             "web/static/**",
             "vis/static/**",
             "CHANGELOG.md",

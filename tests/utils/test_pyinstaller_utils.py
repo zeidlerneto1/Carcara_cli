@@ -83,6 +83,7 @@ def test_pyinstaller_datas():
             "src/kimi_cli/skills/skill-creator/SKILL.md",
             "kimi_cli/skills/skill-creator",
         ),
+        ("src/kimi_cli/ui/shell/tucano.png", "kimi_cli/ui/shell"),
         ("src/kimi_cli/tools/agent/description.md", "kimi_cli/tools/agent"),
         ("src/kimi_cli/tools/ask_user/description.md", "kimi_cli/tools/ask_user"),
         (
