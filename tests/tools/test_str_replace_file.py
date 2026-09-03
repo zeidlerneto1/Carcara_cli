@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pytest
 from kaos.path import KaosPath
 
 from kimi_cli.tools.file.replace import Edit, Params, StrReplaceFile
@@ -340,3 +342,72 @@ async def test_replace_preserves_lf_line_endings(
 
     assert not result.is_error
     assert await file_path.read_bytes() == b"line1\nCHANGED\nline3\n"
+
+
+# ── Tolerância a modelos que serializam `edit` como string JSON ──────────────
+# Alguns modelos (ex: DeepSeek) emitem objetos aninhados como strings JSON.
+# O Params deve aceitar isso e reconstruir o valor estruturado.
+
+
+def test_params_accepts_edit_as_json_string_object():
+    """`edit` passed as a JSON string (single edit) must be coerced to Edit."""
+    params = Params.model_validate(
+        {"path": "/tmp/x.py", "edit": json.dumps({"old": "a", "new": "b"})}
+    )
+    assert isinstance(params.edit, Edit)
+    assert params.edit.old == "a"
+    assert params.edit.new == "b"
+
+
+def test_params_accepts_edit_as_json_string_list():
+    """`edit` passed as a JSON string containing an array must become list[Edit]."""
+    params = Params.model_validate(
+        {
+            "path": "/tmp/x.py",
+            "edit": json.dumps(
+                [{"old": "a", "new": "b"}, {"old": "c", "new": "d", "replace_all": True}]
+            ),
+        }
+    )
+    assert isinstance(params.edit, list)
+    assert len(params.edit) == 2
+    assert params.edit[0].old == "a"
+    assert params.edit[1].old == "c"
+    assert params.edit[1].replace_all is True
+
+
+def test_params_still_accepts_edit_as_object():
+    """Structured `edit` values keep working (regression guard)."""
+    params = Params.model_validate({"path": "/tmp/x.py", "edit": {"old": "a", "new": "b"}})
+    assert isinstance(params.edit, Edit)
+    assert params.edit.old == "a"
+
+
+def test_params_still_accepts_edit_as_object_list():
+    """Structured list-of-`Edit` values keep working (regression guard)."""
+    params = Params.model_validate({"path": "/tmp/x.py", "edit": [{"old": "a", "new": "b"}]})
+    assert isinstance(params.edit, list)
+    assert len(params.edit) == 1
+
+
+def test_params_rejects_invalid_edit_string():
+    """An `edit` string that is not valid JSON must raise a clear validation error."""
+    with pytest.raises(Exception) as excinfo:
+        Params.model_validate({"path": "/tmp/x.py", "edit": "not json"})
+    assert "edit" in str(excinfo.value)
+
+
+async def test_str_replace_works_with_string_edit(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """End-to-end: a string `edit` (as some models emit) must edit the file."""
+    file_path = temp_work_dir / "test.txt"
+    await file_path.write_text("Hello world!")
+    result = await str_replace_file_tool(
+        Params(
+            path=str(file_path),
+            edit=json.dumps({"old": "world", "new": "universe"}),
+        )
+    )
+    assert not result.is_error
+    assert await file_path.read_text() == "Hello universe!"
