@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import shlex
+import sys
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Protocol
 
 from kosong.chat_provider import (
@@ -1493,12 +1495,60 @@ class Shell:
 
 
 _KIMI_BLUE = "dodger_blue1"
-_LOGO = f"""\
-[{_KIMI_BLUE}]\
-▐█▛█▛█▌
-▐█████▌\
-[{_KIMI_BLUE}]\
-"""
+_TUCAO_LOGO = (
+    "            [grey35]▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄[/grey35]\n"
+    "[orange3]   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄[/orange3][grey35]▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀[/grey35]\n"  # noqa: E501
+    "[orange3]  ████████████████████[/orange3][grey35]██[/grey35][white]o[/white][grey35]███████[/grey35]\n"  # noqa: E501
+    "[orange3] █████████████████████[/orange3][grey35]██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄[/grey35]\n"  # noqa: E501
+    "[orange3] █████████████████████[/orange3][grey35]████████████████████[/grey35]\n"  # noqa: E501
+    "[orange3]  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀[/orange3][grey35]▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄[/grey35]\n"  # noqa: E501
+    "             [grey35]▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀[/grey35]\n"
+)
+
+
+def _tucano_image_path() -> Path:
+    """Locate the bundled tucano.png, handling PyInstaller frozen bundles."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        meipass = sys._MEIPASS  # type: ignore[attr-defined]
+        return Path(meipass) / "kimi_cli" / "ui" / "shell" / "tucano.png"
+    return Path(__file__).parent / "tucano.png"
+
+
+def _render_tucano(*, columns: int = 30, rows: int = 8) -> Text | None:
+    """Render tucano.png as half-block colored characters.
+
+    Each terminal character is a vertical half-block (▀) combining two image
+    pixels: the top pixel becomes the foreground color and the bottom the
+    background. Transparent pixels fall back to the terminal's default
+    background. Returns None if the image cannot be loaded so callers can
+    fall back to the ASCII-art logo.
+    """
+    try:
+        from PIL import Image
+
+        img = Image.open(_tucano_image_path()).convert("RGBA")
+    except Exception:
+        return None
+    img = img.resize((columns, rows * 2))
+    px = img.load()
+    out = Text()
+    for y in range(0, rows * 2, 2):
+        row = Text()
+        for x in range(columns):
+            top = px[x, y]
+            bottom = px[x, y + 1]
+            top_trans = top[3] < 128
+            bottom_trans = bottom[3] < 128
+            if top_trans and bottom_trans:
+                row.append(" ")
+                continue
+            fg = f"rgb({top[0]},{top[1]},{top[2]})" if not top_trans else "default"
+            bg = f"rgb({bottom[0]},{bottom[1]},{bottom[2]})" if not bottom_trans else None
+            style = f"{fg} on {bg}" if bg else fg
+            row.append("▀", style=style)
+        out.append_text(row)
+        out.append("\n")
+    return out
 
 
 @dataclass(slots=True)
@@ -1518,7 +1568,7 @@ def _print_welcome_info(name: str, info_items: list[WelcomeInfoItem]) -> None:
     help_text = Text.from_markup("[grey50]Send /help for help information.[/grey50]")
 
     # Use Table for precise width control
-    logo = Text.from_markup(_LOGO)
+    logo = _render_tucano() or Text.from_markup(_TUCAO_LOGO)
     table = Table(show_header=False, show_edge=False, box=None, padding=(0, 1), expand=False)
     table.add_column(justify="left")
     table.add_column(justify="left")
