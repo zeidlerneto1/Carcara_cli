@@ -1,10 +1,11 @@
+import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import override
+from typing import Any, cast, override
 
 from kaos.path import KaosPath
 from kosong.tooling import CallableTool2, ToolError, ToolReturnValue
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from kimi_cli.soul.agent import Runtime
 from kimi_cli.soul.approval import Approval
@@ -38,6 +39,24 @@ class Params(BaseModel):
             "You can provide a single edit or a list of edits here."
         )
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_edit_string(cls, data: Any) -> Any:
+        """Some models serialize nested objects as JSON strings (e.g. ``edit``
+        becomes a string). Accept that and parse it back into a structured value."""
+        if not isinstance(data, dict):
+            return data
+        values: dict[str, Any] = cast("dict[str, Any]", data)
+        edit = values.get("edit")
+        if isinstance(edit, str):
+            try:
+                values["edit"] = json.loads(edit)
+            except (TypeError, ValueError) as e:
+                raise ValueError(
+                    f"`edit` must be a valid JSON object or array, got a string: {e!r}"
+                ) from None
+        return values
 
 
 class StrReplaceFile(CallableTool2[Params]):
