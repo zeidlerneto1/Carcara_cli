@@ -759,7 +759,7 @@ async def upgrade(app: Shell, args: str):
 
     await app._run_shell_command(run_cmd)  # pyright: ignore[reportPrivateUsage]
     console.print(
-        "\n[green]The new Kimi Code is installed ✓[/green]  "
+        "\n[green]The new Carcara Code is installed ✓[/green]  "
         "Your config & sessions were migrated automatically.\n"
         "Open a [bold]new terminal[/bold] and run [bold]kimi[/bold] to start it.\n"
         f"[grey50](Verify with `{verify_command(sys.platform)}` — it should point "

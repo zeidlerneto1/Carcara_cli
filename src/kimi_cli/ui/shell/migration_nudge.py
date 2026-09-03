@@ -68,7 +68,7 @@ def should_show_exit_nudge(marker: Path, today: str) -> bool:
 def welcome_card_text() -> Text:
     """Welcome-screen card nudging users to upgrade (shown when Kimi Code is NOT installed)."""
     return Text.assemble(
-        "The new Kimi Code is here — rebuilt to be faster and more powerful.\n",
+        "The new Carcara Code is here — rebuilt to be faster and more powerful.\n",
         "Run ",
         ("/upgrade", "bold"),
         "; your config & sessions carry over.",
@@ -78,7 +78,7 @@ def welcome_card_text() -> Text:
 def already_installed_text(platform: str) -> Text:
     """Welcome-screen note shown when Kimi Code IS already installed on this machine."""
     return Text.assemble(
-        "The new Kimi Code is already installed. Start it in a fresh terminal with ",
+        "The new Carcara Code is already installed. Start it in a fresh terminal with ",
         ("kimi", "bold"),
         " (verify: ",
         (verify_command(platform), "cyan"),
@@ -90,7 +90,7 @@ def exit_nudge_text(platform: str) -> Text:
     """Throttled tip printed on graceful exit."""
     return Text.assemble(
         ("Tip: ", "yellow"),
-        "The new Kimi Code is rebuilt to be faster and more powerful.\n",
+        "The new Carcara Code is rebuilt to be faster and more powerful.\n",
         "Install: ",
         (install_command(platform), "cyan"),
         ("  (or run /upgrade next time)", "grey50"),

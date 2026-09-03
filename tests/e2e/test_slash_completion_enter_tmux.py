@@ -108,7 +108,7 @@ def test_slash_completion_single_enter_executes(tmp_path: Path) -> None:
             work_dir=work_dir,
             home_dir=home_dir,
         )
-        _wait_for_pane_text(session_name, "Welcome to Kimi Code CLI!")
+        _wait_for_pane_text(session_name, "Welcome to Carcara Code CLI!")
         _wait_for_pane_text(session_name, "── input")
 
         # Type "/session" (partial) to trigger completion menu.
