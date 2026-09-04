@@ -202,8 +202,7 @@ uv run kimi
 # Agente experimental okabe
 uv run kimi --agent okabe -p "teste"
 
-# Agente jarvis (assistente pessoal)
-uv run kimi --agent jarvis -p "oi"
+
 ```
 
 ### Thinking modes
