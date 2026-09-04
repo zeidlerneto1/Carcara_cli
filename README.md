@@ -195,8 +195,6 @@ Você pode escolher um agente embutido na inicialização com a flag `--agent`:
 |--------|-----------|
 | `default` | Agente padrão, adequado para uso geral. |
 | `okabe` | Agente experimental para testar novos prompts e ferramentas. |
-| `jarvis` | Assistente pessoal com system prompt próprio (persona ENI), herda todas as ferramentas do `default`. |
-
 ```bash
 # Agente padrão (default)
 uv run kimi
