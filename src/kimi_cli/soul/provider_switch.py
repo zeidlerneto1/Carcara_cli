@@ -13,7 +13,7 @@ from kosong.message import Message
 from kimi_cli import logger
 from kimi_cli.soul import wire_send
 from kimi_cli.soul.message import system
-from kimi_cli.soul.wire import TextPart
+from kimi_cli.wire.types import TextPart
 from kimi_cli.utils.slashcmd import SlashCommandRegistry
 
 if TYPE_CHECKING:
