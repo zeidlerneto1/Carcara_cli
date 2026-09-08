@@ -13,6 +13,7 @@ from kosong.message import Message
 from kimi_cli import logger
 from kimi_cli.soul import wire_send
 from kimi_cli.soul.message import system
+from kimi_cli.soul.wire import TextPart
 from kimi_cli.utils.slashcmd import SlashCommandRegistry
 
 if TYPE_CHECKING:
@@ -54,7 +55,7 @@ async def provider(soul: KimiSoul, args: str):
         
         lines.append(f"\nCurrent provider: **{current_provider}**")
         lines.append("\nUsage: /provider <provider_name> or /provider <model_alias>")
-        wire_send(wire_send.TextPart(text="\n".join(lines)))
+        wire_send(TextPart(text="\n".join(lines)))
         return
     
     config = soul.runtime.config
@@ -67,7 +68,7 @@ async def provider(soul: KimiSoul, args: str):
         target_provider = config.providers.get(target_model.provider)
         
         if not target_provider:
-            wire_send(wire_send.TextPart(text=f"Provider '{target_model.provider}' not found in config."))
+            wire_send(TextPart(text=f"Provider '{target_model.provider}' not found in config."))
             return
         
         try:
@@ -80,7 +81,7 @@ async def provider(soul: KimiSoul, args: str):
             )
             
             if new_llm is None:
-                wire_send(wire_send.TextPart(text=f"Failed to create LLM for model '{target_alias}'."))
+                wire_send(TextPart(text=f"Failed to create LLM for model '{target_alias}'."))
                 return
             
             # Update runtime
@@ -96,8 +97,8 @@ async def provider(soul: KimiSoul, args: str):
                 except Exception as e:
                     logger.warning("Failed to persist default_model: {error}", error=e)
             
-            wire_send(wire_send.TextPart(text=f"Switched to model: **{target_alias}** ({target_model.model})"))
-            wire_send(wire_send.TextPart(text=f"Provider: **{target_provider.type}** @ {target_provider.base_url}"))
+            wire_send(TextPart(text=f"Switched to model: **{target_alias}** ({target_model.model})"))
+            wire_send(TextPart(text=f"Provider: **{target_provider.type}** @ {target_provider.base_url}"))
             
             # Inject system message to inform LLM
             system_message = system(
@@ -108,7 +109,7 @@ async def provider(soul: KimiSoul, args: str):
             
         except Exception as e:
             logger.exception("Failed to switch model")
-            wire_send(wire_send.TextPart(text=f"Error switching to model '{target_alias}': {e}"))
+            wire_send(TextPart(text=f"Error switching to model '{target_alias}': {e}"))
         return
     
     # Check if arg is a provider name
@@ -123,7 +124,7 @@ async def provider(soul: KimiSoul, args: str):
         ]
         
         if not available_models:
-            wire_send(wire_send.TextPart(
+            wire_send(TextPart(
                 text=f"No models configured for provider '{provider_name}'. "
                      f"Add a model with provider='{provider_name}' to your config."
             ))
@@ -142,7 +143,7 @@ async def provider(soul: KimiSoul, args: str):
             )
             
             if new_llm is None:
-                wire_send(wire_send.TextPart(text=f"Failed to create LLM for provider '{provider_name}'."))
+                wire_send(TextPart(text=f"Failed to create LLM for provider '{provider_name}'."))
                 return
             
             # Update runtime
@@ -158,9 +159,9 @@ async def provider(soul: KimiSoul, args: str):
                 except Exception as e:
                     logger.warning("Failed to persist default_model: {error}", error=e)
             
-            wire_send(wire_send.TextPart(text=f"Switched to provider: **{provider_name}**"))
-            wire_send(wire_send.TextPart(text=f"Model: **{target_alias}** ({target_model.model})"))
-            wire_send(wire_send.TextPart(text=f"URL: {provider_cfg.base_url}"))
+            wire_send(TextPart(text=f"Switched to provider: **{provider_name}**"))
+            wire_send(TextPart(text=f"Model: **{target_alias}** ({target_model.model})"))
+            wire_send(TextPart(text=f"URL: {provider_cfg.base_url}"))
             
             # Inject system message to inform LLM
             system_message = system(
@@ -170,11 +171,11 @@ async def provider(soul: KimiSoul, args: str):
             
         except Exception as e:
             logger.exception("Failed to switch provider")
-            wire_send(wire_send.TextPart(text=f"Error switching to provider '{provider_name}': {e}"))
+            wire_send(TextPart(text=f"Error switching to provider '{provider_name}': {e}"))
         return
     
     # Neither model nor provider found
-    wire_send(wire_send.TextPart(
+    wire_send(TextPart(
         text=f"Unknown provider or model alias: '{args}'\n"
              f"Run /provider without arguments to see available options."
     ))
@@ -253,7 +254,7 @@ async def automatic_fallback(
             old_provider = current_provider_type
             soul.runtime.config.default_model = target_alias
             
-            wire_send(wire_send.TextPart(
+            wire_send(TextPart(
                 text=f"⚠️ **Auto-fallback activated**: Provider '{old_provider}' failed.\n"
                      f"Switched to '{provider_name}' ({target_alias})."
             ))
@@ -282,7 +283,7 @@ async def automatic_fallback(
             continue
     
     # All fallbacks failed
-    wire_send(wire_send.TextPart(
+    wire_send(TextPart(
         text="❌ **All fallback providers unavailable**. Please check your configuration."
     ))
     return False
