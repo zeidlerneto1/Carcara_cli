@@ -325,10 +325,11 @@ def get_default_config() -> Config:
 
 
 def get_carcara_default_config() -> Config:
-    """Build a working default config for the Carcará provider.
+    """Build a working default config for the Carcará provider with fallback options.
 
     Used to auto-provision a usable ``config.toml`` on first startup so the
-    user does not have to create it manually.
+    user does not have to create it manually. Includes Ollama and llama.cpp
+    as local fallback providers.
     """
     return Config(
         default_model="carcara/deepseek",
@@ -337,7 +338,17 @@ def get_carcara_default_config() -> Config:
                 type="carcara",
                 base_url="https://carcara.sinapad.lncc.br/service/v1",
                 api_key=SecretStr(""),
-            )
+            ),
+            "ollama": LLMProvider(
+                type="ollama",
+                base_url="http://localhost:11434/v1",
+                api_key=SecretStr(""),
+            ),
+            "llama_cpp": LLMProvider(
+                type="llama_cpp",
+                base_url="http://localhost:8080/v1",
+                api_key=SecretStr(""),
+            ),
         },
         models={
             "carcara/deepseek": LLMModel(
@@ -345,7 +356,31 @@ def get_carcara_default_config() -> Config:
                 model="DeepSeek-v4-Flash-0731",
                 max_context_size=131072,
                 capabilities={"thinking"},
-            )
+            ),
+            "carcara/qwen": LLMModel(
+                provider="carcara",
+                model="Qwen3.8-27B",
+                max_context_size=32768,
+                capabilities=set(),
+            ),
+            "ollama/llama3": LLMModel(
+                provider="ollama",
+                model="llama3.1:8b",
+                max_context_size=8192,
+                capabilities=set(),
+            ),
+            "ollama/qwen": LLMModel(
+                provider="ollama",
+                model="qwen2.5:7b",
+                max_context_size=32768,
+                capabilities=set(),
+            ),
+            "llama_cpp/model": LLMModel(
+                provider="llama_cpp",
+                model="model",
+                max_context_size=8192,
+                capabilities=set(),
+            ),
         },
     )
 
