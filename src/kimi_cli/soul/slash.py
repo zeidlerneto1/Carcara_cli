@@ -36,7 +36,7 @@ registry = SlashCommandRegistry[SoulSlashCmdFunc]()
 
 # Merge provider commands into the main registry
 registry._commands.update(provider_registry._commands)
-registry._aliases.update(provider_registry._aliases)
+registry._command_aliases.update(provider_registry._command_aliases)
 
 
 @registry.command
