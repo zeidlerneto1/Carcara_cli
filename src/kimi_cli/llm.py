@@ -38,6 +38,8 @@ type ProviderType = Literal[
     "gemini",
     "vertexai",
     "carcara",
+    "ollama",       # local model via Ollama (OpenAI-compatible)
+    "llamacpp",     # local model via llama.cpp server (OpenAI-compatible)
     "_echo",
     "_scripted_echo",
     "_chaos",
@@ -349,6 +351,20 @@ def augment_provider_with_env_vars(provider: LLMProvider, model: LLMModel) -> di
                 provider.base_url = base_url
             if api_key := os.getenv("OPENAI_API_KEY"):
                 provider.api_key = SecretStr(api_key)
+        case "ollama":
+            if base_url := os.getenv("OLLAMA_BASE_URL"):
+                provider.base_url = base_url
+                applied["OLLAMA_BASE_URL"] = base_url
+            if model_name := os.getenv("OLLAMA_MODEL"):
+                model.model = model_name
+                applied["OLLAMA_MODEL"] = model_name
+        case "llamacpp":
+            if base_url := os.getenv("LLAMACPP_BASE_URL"):
+                provider.base_url = base_url
+                applied["LLAMACPP_BASE_URL"] = base_url
+            if model_name := os.getenv("LLAMACPP_MODEL"):
+                model.model = model_name
+                applied["LLAMACPP_MODEL"] = model_name
         case _:
             pass
 
@@ -362,6 +378,201 @@ def _kimi_default_headers(provider: LLMProvider, oauth: OAuthManager | None) -> 
     if provider.custom_headers:
         headers.update(provider.custom_headers)
     return headers
+
+
+def _create_ollama_provider(provider: LLMProvider, model: LLMModel) -> ChatProvider:
+    """Create a chat provider for Ollama local models.
+
+    Ollama exposes an OpenAI-compatible API at http://localhost:11434/v1 by default.
+    We reuse OpenAILegacy since the API is compatible.
+    """
+    from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+
+    base_url = provider.base_url or os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434/v1"
+    model_name = model.model or os.getenv("OLLAMA_MODEL") or "llama3.2"
+
+    return OpenAILegacy(
+        model=model_name,
+        base_url=base_url,
+        api_key=provider.api_key.get_secret_value() if provider.api_key else "ollama",
+        reasoning_key=provider.reasoning_key or "reasoning_content",
+        default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
+    )
+
+
+def _create_llamacpp_provider(provider: LLMProvider, model: LLMModel) -> ChatProvider:
+    """Create a chat provider for llama.cpp server local models.
+
+    llama.cpp server (llama-server) exposes an OpenAI-compatible API at
+    http://localhost:8080/v1 by default. We reuse OpenAILegacy.
+    """
+    from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+
+    base_url = provider.base_url or os.getenv("LLAMACPP_BASE_URL") or "http://localhost:8080/v1"
+    model_name = model.model or os.getenv("LLAMACPP_MODEL") or "local-model"
+
+    return OpenAILegacy(
+        model=model_name,
+        base_url=base_url,
+        api_key=provider.api_key.get_secret_value() if provider.api_key else "llamacpp",
+        reasoning_key=provider.reasoning_key or "reasoning_content",
+        default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
+    )
+
+
+@dataclass(slots=True)
+class _FallbackChatProvider:
+    """Wrapper that provides automatic fallback to local models.
+
+    When the primary provider fails with a network/connection error,
+    this wrapper retries with fallback providers (Ollama, llama.cpp)
+    if they are configured and reachable.
+
+    Set KIMI_LLM_FALLBACK=1 to enable, or configure fallback providers
+    in your config file.
+    """
+
+    _primary: ChatProvider
+    _fallbacks: list[ChatProvider]
+    name: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.name = self._primary.name
+
+    @property
+    def model_name(self) -> str:
+        return self._primary.model_name
+
+    @property
+    def thinking_effort(self) -> ThinkingEffort | None:
+        return self._primary.thinking_effort
+
+    async def generate(
+        self,
+        system_prompt: str,
+        tools: Sequence[Tool],
+        history: Sequence[Message],
+    ) -> StreamedMessage:
+        try:
+            return await self._primary.generate(system_prompt, tools, history)
+        except Exception as primary_error:
+            if not self._fallbacks:
+                raise
+
+            logger.warning(
+                "Primary LLM provider {name} failed: {error}. Trying {count} fallback(s)...",
+                name=self._primary.name,
+                error=str(primary_error),
+                count=len(self._fallbacks),
+            )
+
+            last_error = primary_error
+            for fallback in self._fallbacks:
+                try:
+                    logger.info(
+                        "Falling back to {provider_name} (model: {model})",
+                        provider_name=fallback.name,
+                        model=fallback.model_name,
+                    )
+                    return await fallback.generate(system_prompt, tools, history)
+                except Exception as fallback_error:
+                    last_error = fallback_error
+                    logger.warning(
+                        "Fallback provider {name} also failed: {error}",
+                        name=fallback.name,
+                        error=str(fallback_error),
+                    )
+
+            raise last_error
+
+    def with_thinking(self, effort: ThinkingEffort) -> Self:
+        return type(self)(
+            self._primary.with_thinking(effort),
+            [fb.with_thinking(effort) for fb in self._fallbacks],
+        )
+
+
+def _should_enable_fallback() -> bool:
+    """Check if LLM fallback to local models is enabled."""
+    return os.getenv("KIMI_LLM_FALLBACK", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_fallback_providers(
+    provider: LLMProvider,
+    model: LLMModel,
+    oauth: OAuthManager | None,
+) -> list[ChatProvider]:
+    """Build the list of fallback providers based on configuration.
+
+    Priority order:
+    1. Ollama (if OLLAMA_BASE_URL is set or reachable)
+    2. llama.cpp (if LLAMACPP_BASE_URL is set or reachable)
+    """
+    fallbacks: list[ChatProvider] = []
+
+    # Check if Ollama is configured/reachable
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    if _is_local_service_reachable(ollama_url):
+        try:
+            from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+
+            ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
+            fallbacks.append(
+                OpenAILegacy(
+                    model=ollama_model,
+                    base_url=f"{ollama_url.rstrip('/')}/v1",
+                    api_key="ollama",
+                    reasoning_key="reasoning_content",
+                )
+            )
+            logger.info("Ollama fallback enabled: {url} (model: {model})", url=ollama_url, model=ollama_model)
+        except Exception as e:
+            logger.warning("Failed to create Ollama fallback provider: {error}", error=str(e))
+
+    # Check if llama.cpp is configured/reachable
+    llamacpp_url = os.getenv("LLAMACPP_BASE_URL", "http://localhost:8080")
+    if _is_local_service_reachable(llamacpp_url):
+        try:
+            from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+
+            llamacpp_model = os.getenv("LLAMACPP_MODEL", "local-model")
+            fallbacks.append(
+                OpenAILegacy(
+                    model=llamacpp_model,
+                    base_url=f"{llamacpp_url.rstrip('/')}/v1",
+                    api_key="llamacpp",
+                    reasoning_key="reasoning_content",
+                )
+            )
+            logger.info("llama.cpp fallback enabled: {url} (model: {model})", url=llamacpp_url, model=llamacpp_model)
+        except Exception as e:
+            logger.warning("Failed to create llama.cpp fallback provider: {error}", error=str(e))
+
+    return fallbacks
+
+
+def _is_local_service_reachable(url: str, timeout: float = 2.0) -> bool:
+    """Quick check if a local service is reachable."""
+    import httpx
+
+    try:
+        # Try to hit the health/root endpoint
+        health_url = url.rstrip("/")
+        if not health_url.endswith(("/health", "/v1")):
+            # Try common health endpoints
+            for endpoint in ("/health", "/api/version", "/v1/models"):
+                try:
+                    response = httpx.get(f"{health_url}{endpoint}", timeout=timeout)
+                    if response.status_code < 500:
+                        return True
+                except Exception:
+                    continue
+        else:
+            response = httpx.get(health_url, timeout=timeout)
+            return response.status_code < 500
+    except Exception:
+        pass
+    return False
 
 
 def create_llm(
@@ -511,6 +722,10 @@ def create_llm(
                 vertexai=True,
                 default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
             )
+        case "ollama":
+            chat_provider = _create_ollama_provider(provider, model)
+        case "llamacpp":
+            chat_provider = _create_llamacpp_provider(provider, model)
         case "_echo":
             from kosong.chat_provider.echo import EchoChatProvider
 
@@ -540,6 +755,12 @@ def create_llm(
                     error_types=[429, 500, 503],
                 ),
             )
+
+    # Wrap with fallback providers if enabled
+    if _should_enable_fallback() and provider.type not in {"_echo", "_scripted_echo", "_chaos", "ollama", "llamacpp"}:
+        fallback_providers = _build_fallback_providers(provider, model, oauth)
+        if fallback_providers:
+            chat_provider = _FallbackChatProvider(chat_provider, fallback_providers)
 
     capabilities = derive_model_capabilities(model)
 

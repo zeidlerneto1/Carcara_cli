@@ -4,7 +4,7 @@ Carcará CLI é um agente de IA para terminal, adaptado do [Kimi Code CLI](https
 
 ## O que é o Carcará
 
-O **Carcará** é o serviço de LLM open-source do LNCC, servido via `llama.cpp` em nós GPU do supercomputador Santos Dumont (SINAPAD). O Carcará CLI conecta-se diretamente a este servidor, permitindo que você use modelos como o **DeepSeek-v4-Flash-0731** e **Qwen3.8-27B** diretamente do terminal.
+O **Carcará** é o serviço de LLM open-source do LNCC, servido via `llama.cpp` em nós GPU do supercomputador Santos Dumont (SINAPAD). O Carcará CLI conecta-se diretamente a este servidor, permitindo que você use modelos como o **DeepSeek-v4-Flash-0731** diretamente do terminal.
 
 ## Recursos
 
@@ -12,7 +12,7 @@ O **Carcará** é o serviço de LLM open-source do LNCC, servido via `llama.cpp`
 - 🔧 **Modo Agente** — executa comandos de shell, lê/edita arquivos, busca na web
 - 🛠️ **Tool calling nativo** — `shell`, `read_file`, `write_file`, `grep`, `fetch_url`, etc.
 - ⚡ **Controle fino de sampling** — temperature, top_k, top_p, min_p, XTC, backend sampling
-- 🎯 **Thinking modes** — off, low, medium, high, max (com `thinking_budget_tokens`)
+- 🎯 **Thinking mode** — `--thinking`/`--no-thinking` (booleano), com `thinking_budget_tokens` para controle fino
 - 🌐 **Suporte a tools do LNCC** — `get_environment`, `list_skills`, `get_skill`, `ask_expert`
 
 ---
@@ -194,7 +194,9 @@ Você pode escolher um agente embutido na inicialização com a flag `--agent`:
 | Agente | Descrição |
 |--------|-----------|
 | `default` | Agente padrão, adequado para uso geral. |
-| `okabe` | Agente experimental para testar novos prompts e ferramentas. |
+| `okabe` | Agente estendido do `default` que adiciona a tool `SendDMail` ao conjunto de ferramentas. |
+| `jarvis` | Assistente pessoal com system prompt próprio (persona ENI), herda todas as ferramentas do `default`. |
+
 ```bash
 # Agente padrão (default)
 uv run kimi
@@ -202,26 +204,30 @@ uv run kimi
 # Agente experimental okabe
 uv run kimi --agent okabe -p "teste"
 
-
+# Agente jarvis (assistente pessoal)
+uv run kimi --agent jarvis -p "oi"
 ```
 
-### Thinking modes
+### Thinking mode
+
+A flag `--thinking` é **booleana**: `--thinking` ativa o modo de raciocínio, `--no-thinking` desativa. O valor padrão vem de `default_thinking` no `config.toml`.
 
 ```bash
 # Off (padrão)
 uv run kimi -p "resposta direta"
 
-# Low thinking (512 tokens)
-uv run kimi --thinking low -p "pense um pouco"
+# On (ativa raciocínio)
+uv run kimi --thinking -p "pense um pouco"
 
-# Medium (2048 tokens)
-uv run kimi --thinking medium -p "análise profunda"
+# Off (desativa explicitamente)
+uv run kimi --no-thinking -p "resposta direta"
+```
 
-# High (8192 tokens)
-uv run kimi --thinking high -p "problema complexo"
+Para controlar o **tamanho do raciocínio** (em tokens), use `thinking_budget_tokens` na config do modelo:
 
-# Max (ilimitado)
-uv run kimi --thinking max -p "vá o mais fundo possível"
+```toml
+[models."carcara/deepseek".generation]
+thinking_budget_tokens = 2048
 ```
 
 ### Sampling params (via env vars)
@@ -289,17 +295,17 @@ model = "DeepSeek-v4-Flash-0731"
 max_context_size = 131072
 capabilities = ["thinking"]
 
-[models."carcara/qwen"]
+[models."carcara/deepseek-highctx"]
 provider = "carcara"
-model = "Qwen3.8-27B"
-max_context_size = 32768
+model = "DeepSeek-v4-Flash-0731"
+max_context_size = 65536
 capabilities = ["thinking"]
 ```
 
 Trocar durante a sessão:
 
 ```bash
-uv run kimi /model carcara/qwen
+uv run kimi /model carcara/deepseek-highctx
 ```
 
 ---

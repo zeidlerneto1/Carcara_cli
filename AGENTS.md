@@ -100,6 +100,7 @@ shell UI, ACP server mode for IDE integrations, and MCP tool loading.
     to interact with operating systems. File operations and command executions via KAOS
     can be easily switched between local environment and remote systems over SSH.
 - `tests/`, `tests_ai/`: test suites
+- `telegram_bot/`: standalone Telegram bot embedding `kimi_cli` (uses `KimiCLI.run()`)
 - `klips`: Kimi Code CLI Improvement Proposals
 
 ## Conventions and quality
