@@ -38,6 +38,8 @@ type ProviderType = Literal[
     "gemini",
     "vertexai",
     "carcara",
+    "ollama",
+    "llama_cpp",
     "_echo",
     "_scripted_echo",
     "_chaos",
@@ -349,6 +351,23 @@ def augment_provider_with_env_vars(provider: LLMProvider, model: LLMModel) -> di
                 provider.base_url = base_url
             if api_key := os.getenv("OPENAI_API_KEY"):
                 provider.api_key = SecretStr(api_key)
+        case "ollama":
+            if base_url := os.getenv("OLLAMA_BASE_URL"):
+                provider.base_url = base_url
+                applied["OLLAMA_BASE_URL"] = base_url
+            if model_name := os.getenv("OLLAMA_MODEL_NAME"):
+                model.model = model_name
+                applied["OLLAMA_MODEL_NAME"] = model_name
+        case "llama_cpp":
+            if base_url := os.getenv("LLAMA_CPP_BASE_URL"):
+                provider.base_url = base_url
+                applied["LLAMA_CPP_BASE_URL"] = base_url
+            if api_key := os.getenv("LLAMA_CPP_API_KEY"):
+                provider.api_key = SecretStr(api_key)
+                applied["LLAMA_CPP_API_KEY"] = "******"
+            if model_name := os.getenv("LLAMA_CPP_MODEL_NAME"):
+                model.model = model_name
+                applied["LLAMA_CPP_MODEL_NAME"] = model_name
         case _:
             pass
 
@@ -509,6 +528,28 @@ def create_llm(
                 base_url=provider.base_url,
                 api_key=resolved_api_key,
                 vertexai=True,
+                default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
+            )
+        case "ollama":
+            from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+
+            # Ollama uses OpenAI-compatible API at http://localhost:11434/v1
+            chat_provider = OpenAILegacy(
+                model=model.model,
+                base_url=provider.base_url or "http://localhost:11434/v1",
+                api_key=resolved_api_key or "ollama",  # Ollama doesn't require a real API key
+                reasoning_key=provider.reasoning_key or "reasoning_content",
+                default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
+            )
+        case "llama_cpp":
+            from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+
+            # llama.cpp server uses OpenAI-compatible API
+            chat_provider = OpenAILegacy(
+                model=model.model,
+                base_url=provider.base_url or "http://localhost:8080/v1",
+                api_key=resolved_api_key or "llama-cpp",  # Default API key for llama.cpp
+                reasoning_key=provider.reasoning_key or "reasoning_content",
                 default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
             )
         case "_echo":
