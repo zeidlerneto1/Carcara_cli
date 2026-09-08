@@ -15,6 +15,7 @@ from kimi_cli.soul.agent import load_agents_md
 from kimi_cli.soul.context import Context
 from kimi_cli.soul.dynamic_injections.afk_mode import AFK_DISABLED_REMINDER
 from kimi_cli.soul.message import system, system_reminder
+from kimi_cli.soul.provider_switch import registry as provider_registry  # Import provider commands
 from kimi_cli.utils.export import is_sensitive_file
 from kimi_cli.utils.path import sanitize_cli_path, shorten_home
 from kimi_cli.utils.slashcmd import SlashCommandRegistry
@@ -32,6 +33,10 @@ Raises:
 """
 
 registry = SlashCommandRegistry[SoulSlashCmdFunc]()
+
+# Merge provider commands into the main registry
+registry._commands.update(provider_registry._commands)
+registry._aliases.update(provider_registry._aliases)
 
 
 @registry.command
