@@ -2,12 +2,14 @@
 
 Provides manual provider switching via /provider slash command and
 automatic fallback when the current provider becomes unavailable.
+Also includes auto-discovery of local providers (Ollama, llama.cpp).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
 from kosong.message import Message
 
 from kimi_cli import logger
@@ -24,6 +26,67 @@ type SoulSlashCmdFunc = callable[[KimiSoul, str], None]
 registry = SlashCommandRegistry[SoulSlashCmdFunc]()
 
 
+async def _discover_ollama_models(base_url: str = "http://localhost:11434") -> list[str]:
+    """Discover available models from Ollama server."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{base_url}/api/tags")
+            if response.status_code == 200:
+                data = response.json()
+                models = [model["name"] for model in data.get("models", [])]
+                logger.info("Discovered {count} Ollama models: {models}", count=len(models), models=models)
+                return models
+    except Exception as e:
+        logger.debug("Ollama not available at {url}: {error}", url=base_url, error=e)
+    return []
+
+
+async def _discover_llamacpp_models(base_url: str = "http://localhost:8080") -> list[str]:
+    """Discover available models from llama.cpp server."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{base_url}/completion")
+            # llama.cpp doesn't have a direct models endpoint, but we can check if it's running
+            # Usually returns 400 or 405, but connection success means it's up
+            if response.status_code in [400, 405, 200]:
+                logger.info("llama.cpp server detected at {url}", url=base_url)
+                return ["default"]  # llama.cpp typically serves one model at a time
+    except Exception as e:
+        logger.debug("llama.cpp not available at {url}: {error}", url=base_url, error=e)
+    return []
+
+
+async def discover_local_providers(config) -> dict[str, dict]:
+    """Auto-discover local providers and their models.
+    
+    Returns a dict of discovered providers with their models.
+    These are merged with configured providers for display/usage.
+    """
+    discovered = {}
+    
+    # Check Ollama
+    ollama_models = await _discover_ollama_models()
+    if ollama_models:
+        discovered["ollama"] = {
+            "type": "ollama",
+            "base_url": "http://localhost:11434",
+            "models": ollama_models,
+            "auto_discovered": True
+        }
+    
+    # Check llama.cpp
+    llamacpp_models = await _discover_llamacpp_models()
+    if llamacpp_models:
+        discovered["llama_cpp"] = {
+            "type": "llama_cpp",
+            "base_url": "http://localhost:8080",
+            "models": llamacpp_models,
+            "auto_discovered": True
+        }
+    
+    return discovered
+
+
 @registry.command
 async def provider(soul: KimiSoul, args: str):
     """Switch to a different provider/model. Usage: /provider <provider_name> or /provider <model_alias>
@@ -37,10 +100,15 @@ async def provider(soul: KimiSoul, args: str):
     from kimi_cli.config import save_config
     from kimi_cli.llm import create_llm
     
+    # Auto-discover local providers
+    discovered = await discover_local_providers(soul.runtime.config)
+    
     args = args.strip()
     if not args:
-        # List available providers and models
+        # List available providers and models (configured + discovered)
         lines = ["Available providers and models:"]
+        
+        # Show configured providers
         for provider_name, provider_cfg in soul.runtime.config.providers.items():
             lines.append(f"\n  **{provider_name}** ({provider_cfg.type})")
             lines.append(f"     URL: {provider_cfg.base_url}")
@@ -48,6 +116,14 @@ async def provider(soul: KimiSoul, args: str):
                 if model_cfg.provider == provider_name:
                     marker = "★ " if alias == soul.runtime.config.default_model else "  "
                     lines.append(f"     {marker}{alias}: {model_cfg.model}")
+        
+        # Show auto-discovered providers
+        for provider_name, provider_info in discovered.items():
+            if provider_name not in soul.runtime.config.providers:
+                lines.append(f"\n  **{provider_name}** ({provider_info['type']}) [AUTO-DISCOVERED]")
+                lines.append(f"     URL: {provider_info['base_url']}")
+                for model in provider_info['models']:
+                    lines.append(f"       • {model}")
         
         current_provider = None
         if soul.runtime.llm and soul.runtime.llm.provider_config:
