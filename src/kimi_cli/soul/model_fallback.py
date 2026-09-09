@@ -46,7 +46,10 @@ __all__ = [
 MODEL_FALLBACK_CHECK_TIMEOUT_S = 3.0
 
 
-async def _list_provider_model_ids(provider_key: str, config: Config) -> set[str] | None:
+async def _list_provider_model_ids(
+    provider_key: str,
+    config: Config,
+) -> set[str] | None:
     """Return the set of model ids currently served by ``provider_key``.
 
     Returns ``None`` when the probe could not be completed (no ``base_url``,
@@ -57,6 +60,7 @@ async def _list_provider_model_ids(provider_key: str, config: Config) -> set[str
         get_platform_by_id,
         list_carcara_models,
         list_models,
+        list_ollama_models,
         parse_managed_provider_key,
     )
 
@@ -64,28 +68,60 @@ async def _list_provider_model_ids(provider_key: str, config: Config) -> set[str
     if provider is None or not provider.base_url:
         return None
 
-    api_key = provider.api_key.get_secret_value() if provider.api_key else None
+    api_key = (
+        provider.api_key.get_secret_value()
+        if provider.api_key
+        else None
+    )
 
     if provider.type == "kimi":
-        # Kimi's managed models are listed through the platform endpoint, not
-        # the provider base_url.
+        # Kimi's managed models are listed through the platform endpoint,
+        # not the provider base_url.
         platform_id = parse_managed_provider_key(provider_key) or "kimi-code"
         platform = get_platform_by_id(platform_id)
+
         if platform is None:
             return None
+
         if not api_key:
             return None
+
         try:
             infos = await list_models(platform, api_key)
         except Exception as exc:
-            logger.debug("Model fallback: listing kimi models failed: {error}", error=exc)
+            logger.debug(
+                "Model fallback: listing kimi models failed: {error}",
+                error=exc,
+            )
             return None
-    else:
-        # Carcara and any OpenAI-compatible endpoint expose ``/models`` with a
-        # ``data: [{id, ...}]`` shape that ``list_carcara_models`` parses
-        # tolerantly (returns [] on HTTP errors).
+
+    elif provider.type == "ollama":
+        # Ollama uses its native API:
+        # GET /api/tags
+        #
+        # Do NOT use list_carcara_models() here because that probes
+        # /models, which is not Ollama's native endpoint.
         try:
-            infos = await list_carcara_models(provider.base_url, api_key)
+            infos = await list_ollama_models(
+                provider.base_url,
+                api_key,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Model fallback: listing ollama models for {provider} "
+                "failed: {error}",
+                provider=provider_key,
+                error=exc,
+            )
+            return None
+
+    else:
+        # Carcara and other OpenAI-compatible providers use /models.
+        try:
+            infos = await list_carcara_models(
+                provider.base_url,
+                api_key,
+            )
         except Exception as exc:
             logger.debug(
                 "Model fallback: listing models for {provider} failed: {error}",
@@ -95,7 +131,6 @@ async def _list_provider_model_ids(provider_key: str, config: Config) -> set[str
             return None
 
     return {info.id for info in infos}
-
 
 #: TTL for the on-disk model availability cache. The availability probe is a
 #: network round-trip that would otherwise run on every CLI startup; caching it

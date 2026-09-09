@@ -565,3 +565,62 @@ async def refresh_carcara_models(config: Config) -> bool:
     if changed:
         save_config(config_for_save)
     return changed
+
+
+async def list_ollama_models(
+    base_url: str,
+) -> list[ModelInfo]:
+    """List models available from the native Ollama API."""
+    models_url = f"{base_url.rstrip('/')}/tags"
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0),
+        ) as client:
+            response = await client.get(models_url)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "Ollama models request failed with HTTP {status}: {url}",
+            status=exc.response.status_code,
+            url=models_url,
+        )
+        return []
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "Ollama models request failed: {error}",
+            error=exc,
+        )
+        return []
+
+    models = payload.get("models")
+    if not isinstance(models, list):
+        logger.warning(
+            "Unexpected Ollama models response for {url}",
+            url=models_url,
+        )
+        return []
+
+    result: list[ModelInfo] = []
+
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+
+        model_id = item.get("name")
+        if not model_id:
+            continue
+
+        result.append(
+            ModelInfo(
+                id=str(model_id),
+                context_length=0,
+                supports_reasoning=False,
+                supports_image_in=False,
+                supports_video_in=False,
+                display_name=str(model_id),
+            )
+        )
+
+    return result

@@ -931,11 +931,12 @@ async def fork(app: Shell, args: str):
     raise Reload(session_id=new_session_id)
 
 
-from . import (  # noqa: E402
-    debug,  # noqa: F401 # type: ignore[reportUnusedImport]
-    export_import,  # noqa: F401 # type: ignore[reportUnusedImport]
-    oauth,  # noqa: F401 # type: ignore[reportUnusedImport]
-    setup,  # noqa: F401 # type: ignore[reportUnusedImport]
-    update,  # noqa: F401 # type: ignore[reportUnusedImport]
-    usage,  # noqa: F401 # type: ignore[reportUnusedImport]
+from . import (
+    debug,
+    export_import,
+    oauth,
+    provider,
+    setup,
+    update,
+    usage,
 )

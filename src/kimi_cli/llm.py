@@ -384,23 +384,28 @@ def _kimi_default_headers(provider: LLMProvider, oauth: OAuthManager | None) -> 
 
 
 def _create_ollama_provider(provider: LLMProvider, model: LLMModel) -> ChatProvider:
-    """Create a chat provider for Ollama local models.
+    """Create a native Ollama chat provider."""
 
-    Ollama exposes an OpenAI-compatible API at http://localhost:11434/v1 by default.
-    We reuse OpenAILegacy since the API is compatible.
-    """
-    from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+    from kimi_cli.ollama import OllamaProvider
 
-    base_url = provider.base_url or os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434/v1"
-    model_name = model.model or os.getenv("OLLAMA_MODEL") or "llama3.2"
+    base_url = (
+        provider.base_url
+        or os.getenv("OLLAMA_BASE_URL")
+        or "http://localhost:11434/api"
+    )
 
-    return OpenAILegacy(
+    model_name = (
+        model.model
+        or os.getenv("OLLAMA_MODEL_NAME")
+        or os.getenv("OLLAMA_MODEL")
+        or "llama3.2"
+    )
+
+    return OllamaProvider(
         model=model_name,
         base_url=base_url,
-        api_key=provider.api_key.get_secret_value() if provider.api_key else "ollama",
-        reasoning_key=provider.reasoning_key or "reasoning_content",
-        default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
     )
+
 
 
 def _create_llamacpp_provider(provider: LLMProvider, model: LLMModel) -> ChatProvider:
@@ -586,6 +591,14 @@ def create_llm(
     session_id: str | None = None,
     oauth: OAuthManager | None = None,
 ) -> LLM | None:
+    # logger.debug(
+    #     "CREATE_LLM provider=%r model=%r provider_type=%r base_url=%r model_name=%r",
+    #     provider,
+    #     model,
+    #     provider.type,
+    #     provider.base_url,
+    #     model.model,
+    # )
     if provider.type not in {"_echo", "_scripted_echo"} and (
         not provider.base_url or not model.model
     ):
@@ -726,15 +739,12 @@ def create_llm(
                 default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
             )
         case "ollama":
-            from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+            from kimi_cli.ollama import OllamaProvider
 
-            # Ollama uses OpenAI-compatible API at http://localhost:11434/v1
-            chat_provider = OpenAILegacy(
+            # Ollama uses Ollama pattern API at http://localhost:11434/v1
+            chat_provider = OllamaProvider(
                 model=model.model,
-                base_url=provider.base_url or "http://localhost:11434/v1",
-                api_key=resolved_api_key or "ollama",  # Ollama doesn't require a real API key
-                reasoning_key=provider.reasoning_key or "reasoning_content",
-                default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
+                base_url=provider.base_url or "http://localhost:11434/api",
             )
         case "llama_cpp":
             from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
@@ -778,7 +788,7 @@ def create_llm(
             )
 
     # Wrap with fallback providers if enabled
-    if _should_enable_fallback() and provider.type not in {"_echo", "_scripted_echo", "_chaos", "ollama", "llamacpp"}:
+    if _should_enable_fallback() and provider.type not in {"_echo", "_scripted_echo", "_chaos", "ollama", "llama_cpp"}:
         fallback_providers = _build_fallback_providers(provider, model, oauth)
         if fallback_providers:
             chat_provider = _FallbackChatProvider(chat_provider, fallback_providers)
@@ -805,7 +815,12 @@ def create_llm(
             thinking_keep := os.getenv("KIMI_MODEL_THINKING_KEEP")
         ):
             chat_provider = chat_provider.with_extra_body({"thinking": {"keep": thinking_keep}})
-
+    # logger.debug(
+    #     "OLLAMA CHAT PROVIDER CREATED: type=%s model=%s provider=%s",
+    #     type(chat_provider).__name__,
+    #     chat_provider.model_name,
+    #     provider.type,
+    # )
     return LLM(
         chat_provider=chat_provider,
         max_context_size=model.max_context_size,
