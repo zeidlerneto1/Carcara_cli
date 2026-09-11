@@ -132,6 +132,62 @@ Overrides the provider's `api_key` field in the configuration file.
 export OPENAI_API_KEY="sk-xxx"
 ```
 
+## Local model environment variables
+
+The following environment variables take effect when using `ollama` or `llama_cpp` type providers.
+They override the corresponding fields in the configuration file.
+
+| Environment Variable | Provider | Description |
+| --- | --- | --- |
+| `OLLAMA_BASE_URL` | `ollama` | Ollama native API base URL (default `http://localhost:11434/api`) |
+| `OLLAMA_MODEL_NAME` | `ollama` | Model identifier (`OLLAMA_MODEL` is accepted as a legacy alias) |
+| `LLAMA_CPP_BASE_URL` | `llama_cpp` | llama.cpp server base URL (default `http://localhost:8080/v1`) |
+| `LLAMA_CPP_API_KEY` | `llama_cpp` | API key for the llama.cpp server (optional) |
+| `LLAMA_CPP_MODEL_NAME` | `llama_cpp` | Model identifier served by the llama.cpp server |
+
+### `OLLAMA_BASE_URL`
+
+Overrides the provider's `base_url` field for an `ollama` provider. Both the native root
+(`http://localhost:11434/api`) and the OpenAI-compatible form (`http://localhost:11434/v1`) are
+accepted; the latter is normalized to the native `/api` root automatically.
+
+```sh
+export OLLAMA_BASE_URL="http://localhost:11434/api"
+```
+
+### `OLLAMA_MODEL_NAME`
+
+Overrides the model's `model` field for an `ollama` provider. `OLLAMA_MODEL` is still accepted as
+an alias.
+
+```sh
+export OLLAMA_MODEL_NAME="qwen3:8b"
+```
+
+### `LLAMA_CPP_BASE_URL`
+
+Overrides the provider's `base_url` field for a `llama_cpp` provider.
+
+```sh
+export LLAMA_CPP_BASE_URL="http://localhost:8080/v1"
+```
+
+### `LLAMA_CPP_API_KEY`
+
+Overrides the provider's `api_key` field for a `llama_cpp` provider.
+
+```sh
+export LLAMA_CPP_API_KEY="secret"
+```
+
+### `LLAMA_CPP_MODEL_NAME`
+
+Overrides the model's `model` field for a `llama_cpp` provider.
+
+```sh
+export LLAMA_CPP_MODEL_NAME="qwen2.5-7b"
+```
+
 ## Other environment variables
 
 | Environment Variable | Description |

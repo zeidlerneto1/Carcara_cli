@@ -192,6 +192,16 @@ def test_carcara_default_config_roundtrips():
     assert "carcara" in reloaded.providers
 
 
+def test_carcara_default_config_ollama_uses_native_api():
+    """The auto-provisioned Ollama provider must point at the native /api root so
+    the OllamaProvider (which hits /api/chat) works out of the box."""
+    config = get_carcara_default_config()
+    ollama = config.providers["ollama"]
+    assert ollama.type == "ollama"
+    assert ollama.base_url == "http://localhost:11434/api"
+    assert config.providers["llama_cpp"].base_url == "http://localhost:8080/v1"
+
+
 def test_model_generation_parsed_from_config_string():
     """ModelGeneration is parsed from the generation section of a model."""
     cfg = json.loads(

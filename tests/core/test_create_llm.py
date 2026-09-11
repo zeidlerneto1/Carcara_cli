@@ -218,6 +218,46 @@ def test_create_llm_anthropic_without_session_id():
     assert llm.chat_provider._metadata is None
 
 
+def test_create_llm_ollama_native_provider():
+    from kimi_cli.ollama import OllamaProvider
+
+    provider = LLMProvider(type="ollama", base_url="", api_key=SecretStr(""))
+    model = LLMModel(provider="ollama", model="qwen3:8b", max_context_size=32768)
+
+    llm = create_llm(provider, model)
+    assert llm is not None
+    assert isinstance(llm.chat_provider, OllamaProvider)
+    # Local providers work without an explicit base_url; the native default is used.
+    assert llm.chat_provider.base_url == "http://localhost:11434/api"
+
+
+def test_create_llm_ollama_normalizes_base_url():
+    from kimi_cli.ollama import OllamaProvider
+
+    # An OpenAI-compatible /v1 URL must be normalized to the native /api root.
+    provider = LLMProvider(
+        type="ollama", base_url="http://localhost:11434/v1", api_key=SecretStr("")
+    )
+    model = LLMModel(provider="ollama", model="qwen3:8b", max_context_size=32768)
+
+    llm = create_llm(provider, model)
+    assert llm is not None
+    assert isinstance(llm.chat_provider, OllamaProvider)
+    assert llm.chat_provider.base_url == "http://localhost:11434/api"
+
+
+def test_create_llm_llama_cpp_openai_compatible():
+    from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+
+    provider = LLMProvider(type="llama_cpp", base_url="", api_key=SecretStr(""))
+    model = LLMModel(provider="llama_cpp", model="local-model", max_context_size=8192)
+
+    llm = create_llm(provider, model)
+    assert llm is not None
+    assert isinstance(llm.chat_provider, OpenAILegacy)
+    assert str(llm.chat_provider.client.base_url).rstrip("/") == "http://localhost:8080/v1"
+
+
 def test_create_llm_requires_base_url_for_kimi():
     provider = LLMProvider(type="kimi", base_url="", api_key=SecretStr("test-key"))
     model = LLMModel(provider="kimi", model="kimi-base", max_context_size=4096)

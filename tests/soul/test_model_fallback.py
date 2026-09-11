@@ -407,6 +407,33 @@ async def test_try_model_fallback_no_alternative(runtime: Runtime, tmp_path: Pat
     assert getattr(soul, "_model_fallback_attempted", False) is False
 
 
+class TestOllamaProviderFallback:
+    @pytest.mark.asyncio
+    async def test_list_provider_model_ids_ollama_calls_with_single_arg(self):
+        """The Ollama branch must call list_ollama_models(base_url) with a single
+        positional arg (its signature only accepts base_url). Passing api_key was a
+        bug that raised TypeError."""
+        config = _make_config(
+            models={
+                "a": LLMModel(provider="ollama", model="qwen3:8b", max_context_size=32768),
+            },
+            providers={
+                "ollama": LLMProvider(
+                    type="ollama", base_url="http://localhost:11434/api", api_key=SecretStr("")
+                )
+            },
+        )
+
+        with patch(
+            "kimi_cli.auth.platforms.list_ollama_models", new=AsyncMock(return_value=[])
+        ) as mock_list:
+            result = await mf._list_provider_model_ids("ollama", config)
+
+        assert result == set()
+        # Only base_url is passed — no TypeError from an extra api_key argument.
+        mock_list.assert_awaited_once_with("http://localhost:11434/api")
+
+
 class TestAvailabilityCache:
     """Tests for the on-disk model availability cache."""
 

@@ -567,11 +567,27 @@ async def refresh_carcara_models(config: Config) -> bool:
     return changed
 
 
+def _normalize_ollama_base_url(base_url: str) -> str:
+    """Return the Ollama native API root for a possibly OpenAI-compatible URL.
+
+    Ollama exposes its native API under ``/api`` (e.g. ``/api/tags``, ``/api/chat``),
+    and an OpenAI-compatible endpoint under ``/v1``. Configuration may carry either
+    form, so we strip any trailing ``/v1`` and append ``/api`` to hit the native
+    endpoint reliably.
+    """
+    root = base_url.rstrip("/")
+    if root.endswith("/v1"):
+        root = root[: -len("/v1")]
+    if root.endswith("/api"):
+        return root
+    return f"{root}/api"
+
+
 async def list_ollama_models(
     base_url: str,
 ) -> list[ModelInfo]:
     """List models available from the native Ollama API."""
-    models_url = f"{base_url.rstrip('/')}/tags"
+    models_url = f"{_normalize_ollama_base_url(base_url)}/tags"
 
     try:
         async with httpx.AsyncClient(

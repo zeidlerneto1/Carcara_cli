@@ -1,0 +1,3 @@
+# The bot depends on kimi_cli (from the repo) and python-telegram-bot.
+# Prefer using `uv sync` with the bundled pyproject.toml.
+python-telegram-bot>=21.0

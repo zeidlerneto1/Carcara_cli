@@ -34,6 +34,8 @@ Kimi Code CLI 支持多种 LLM 平台，可以通过配置文件或 `/login` 命
 | `anthropic` | Anthropic Claude API |
 | `gemini` | Google Gemini API |
 | `vertexai` | Google Vertex AI |
+| `ollama` | Ollama 原生 API（本地模型） |
+| `llama_cpp` | llama.cpp 服务器（OpenAI 兼容，本地模型） |
 
 所有供应商类型都支持通过 `custom_headers` 字段添加自定义 HTTP 请求头。详见 [配置文件](./config-files.md)。
 
@@ -102,6 +104,48 @@ type = "vertexai"
 base_url = "https://xxx-aiplatform.googleapis.com"
 api_key = ""
 env = { GOOGLE_CLOUD_PROJECT = "your-project-id" }
+```
+
+### `ollama`
+
+用于连接本地的 [Ollama](https://ollama.com) 服务器。`type` 为 `ollama`，使用 Ollama 的**原生** API（`/api/chat`、`/api/tags`），支持支持工具调用的模型的函数调用/工具调用能力（例如 `qwen3`、`llama3.1+`、`mistral` 等）。
+
+默认 `base_url` 为 `http://localhost:11434/api`。如果你只知道 Ollama 的 OpenAI 兼容 URL（`http://localhost:11434/v1`），也可以直接使用——CLI 会自动将其规范化为 `/api`。
+
+```toml
+[providers.ollama]
+type = "ollama"
+base_url = "http://localhost:11434/api"
+api_key = ""
+```
+
+```toml
+[models.ollama/qwen3]
+provider = "ollama"
+model = "qwen3:8b"
+max_context_size = 32768
+```
+
+你也可以在 Shell 模式下通过 `/provider` 斜杠命令交互式配置 Ollama，该命令会自动检测本地已安装的模型。
+
+### `llama_cpp`
+
+用于连接本地的 [llama.cpp](https://github.com/ggerganov/llama.cpp) 服务器（`llama-server`），它暴露 **OpenAI 兼容**的 API。底层使用 `OpenAILegacy` 客户端，因此支持工具调用的模型的函数调用能力也能正常工作。
+
+默认 `base_url` 为 `http://localhost:8080/v1`。
+
+```toml
+[providers.llama_cpp]
+type = "llama_cpp"
+base_url = "http://localhost:8080/v1"
+api_key = ""
+```
+
+```toml
+[models.llama_cpp/model]
+provider = "llama_cpp"
+model = "your-model"
+max_context_size = 8192
 ```
 
 ## 模型能力

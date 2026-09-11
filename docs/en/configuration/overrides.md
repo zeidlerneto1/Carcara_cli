@@ -55,6 +55,8 @@ Environment variables take effect based on the current provider type:
 
 - `kimi` type providers: Use `KIMI_*` environment variables
 - `openai_legacy` or `openai_responses` type providers: Use `OPENAI_*` environment variables
+- `ollama` type providers: Use `OLLAMA_*` environment variables
+- `llama_cpp` type providers: Use `LLAMA_CPP_*` environment variables
 - Other provider types: Environment variable overrides not supported
 
 See [Environment Variables](./env-vars.md) for the complete list.

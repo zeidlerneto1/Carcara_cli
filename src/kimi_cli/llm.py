@@ -352,10 +352,12 @@ def augment_provider_with_env_vars(provider: LLMProvider, model: LLMModel) -> di
             if api_key := os.getenv("OPENAI_API_KEY"):
                 provider.api_key = SecretStr(api_key)
         case "ollama":
+            # Accept both OLLAMA_BASE_URL (preferred) and the legacy OLLAMA_URL alias.
             if base_url := os.getenv("OLLAMA_BASE_URL"):
                 provider.base_url = base_url
                 applied["OLLAMA_BASE_URL"] = base_url
-            if model_name := os.getenv("OLLAMA_MODEL_NAME"):
+            # OLLAMA_MODEL_NAME is preferred; OLLAMA_MODEL is kept as a legacy alias.
+            if model_name := os.getenv("OLLAMA_MODEL_NAME") or os.getenv("OLLAMA_MODEL"):
                 model.model = model_name
                 applied["OLLAMA_MODEL_NAME"] = model_name
         case "llama_cpp":
@@ -381,51 +383,6 @@ def _kimi_default_headers(provider: LLMProvider, oauth: OAuthManager | None) -> 
     if provider.custom_headers:
         headers.update(provider.custom_headers)
     return headers
-
-
-def _create_ollama_provider(provider: LLMProvider, model: LLMModel) -> ChatProvider:
-    """Create a native Ollama chat provider."""
-
-    from kimi_cli.ollama import OllamaProvider
-
-    base_url = (
-        provider.base_url
-        or os.getenv("OLLAMA_BASE_URL")
-        or "http://localhost:11434/api"
-    )
-
-    model_name = (
-        model.model
-        or os.getenv("OLLAMA_MODEL_NAME")
-        or os.getenv("OLLAMA_MODEL")
-        or "llama3.2"
-    )
-
-    return OllamaProvider(
-        model=model_name,
-        base_url=base_url,
-    )
-
-
-
-def _create_llamacpp_provider(provider: LLMProvider, model: LLMModel) -> ChatProvider:
-    """Create a chat provider for llama.cpp server local models.
-
-    llama.cpp server (llama-server) exposes an OpenAI-compatible API at
-    http://localhost:8080/v1 by default. We reuse OpenAILegacy.
-    """
-    from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
-
-    base_url = provider.base_url or os.getenv("LLAMACPP_BASE_URL") or "http://localhost:8080/v1"
-    model_name = model.model or os.getenv("LLAMACPP_MODEL") or "local-model"
-
-    return OpenAILegacy(
-        model=model_name,
-        base_url=base_url,
-        api_key=provider.api_key.get_secret_value() if provider.api_key else "llamacpp",
-        reasoning_key=provider.reasoning_key or "reasoning_content",
-        default_headers=dict(provider.custom_headers) if provider.custom_headers else None,
-    )
 
 
 @dataclass(slots=True)
@@ -599,7 +556,11 @@ def create_llm(
     #     provider.base_url,
     #     model.model,
     # )
-    if provider.type not in {"_echo", "_scripted_echo"} and (
+    # Local providers (ollama, llama_cpp) apply sensible defaults for base_url and
+    # model when they are left empty in the config, so they are exempt from the
+    # strict guard below.
+    local_providers = {"ollama", "llama_cpp"}
+    if provider.type not in local_providers and provider.type not in {"_echo", "_scripted_echo"} and (
         not provider.base_url or not model.model
     ):
         logger.warning(
@@ -741,18 +702,24 @@ def create_llm(
         case "ollama":
             from kimi_cli.ollama import OllamaProvider
 
-            # Ollama uses Ollama pattern API at http://localhost:11434/v1
+            # Ollama uses its native API at http://localhost:11434/api by default.
+            # The provider normalizes a bare host (or /v1 suffix) to /api internally.
             chat_provider = OllamaProvider(
-                model=model.model,
-                base_url=provider.base_url or "http://localhost:11434/api",
+                model=model.model or os.getenv("OLLAMA_MODEL_NAME") or os.getenv("OLLAMA_MODEL") or "llama3.2",
+                base_url=provider.base_url or os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434/api",
             )
         case "llama_cpp":
             from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
 
-            # llama.cpp server uses OpenAI-compatible API
+            # llama.cpp server (llama-server) exposes an OpenAI-compatible API
+            # at http://localhost:8080/v1 by default.
             chat_provider = OpenAILegacy(
-                model=model.model,
-                base_url=provider.base_url or "http://localhost:8080/v1",
+                model=model.model
+                or os.getenv("LLAMA_CPP_MODEL_NAME")
+                or "local-model",
+                base_url=provider.base_url
+                or os.getenv("LLAMA_CPP_BASE_URL")
+                or "http://localhost:8080/v1",
                 api_key=resolved_api_key or "llama-cpp",  # Default API key for llama.cpp
                 reasoning_key=provider.reasoning_key or "reasoning_content",
                 default_headers=dict(provider.custom_headers) if provider.custom_headers else None,

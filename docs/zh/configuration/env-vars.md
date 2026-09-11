@@ -132,6 +132,58 @@ export OPENAI_BASE_URL="https://api.openai.com/v1"
 export OPENAI_API_KEY="sk-xxx"
 ```
 
+## 本地模型环境变量
+
+以下环境变量在使用 `ollama` 或 `llama_cpp` 类型的供应商时生效，用于覆盖配置文件中的对应字段。
+
+| 环境变量 | 供应商 | 说明 |
+| --- | --- | --- |
+| `OLLAMA_BASE_URL` | `ollama` | Ollama 原生 API 基础 URL（默认 `http://localhost:11434/api`） |
+| `OLLAMA_MODEL_NAME` | `ollama` | 模型标识符（`OLLAMA_MODEL` 作为兼容别名仍然接受） |
+| `LLAMA_CPP_BASE_URL` | `llama_cpp` | llama.cpp 服务器基础 URL（默认 `http://localhost:8080/v1`） |
+| `LLAMA_CPP_API_KEY` | `llama_cpp` | llama.cpp 服务器的 API 密钥（可选） |
+| `LLAMA_CPP_MODEL_NAME` | `llama_cpp` | llama.cpp 服务器提供的模型标识符 |
+
+### `OLLAMA_BASE_URL`
+
+覆盖 `ollama` 供应商的 `base_url` 字段。原生根路径（`http://localhost:11434/api`）和 OpenAI 兼容形式（`http://localhost:11434/v1`）均可接受；后者会自动规范化为原生 `/api` 根路径。
+
+```sh
+export OLLAMA_BASE_URL="http://localhost:11434/api"
+```
+
+### `OLLAMA_MODEL_NAME`
+
+覆盖 `ollama` 供应商的模型 `model` 字段。`OLLAMA_MODEL` 仍然作为别名接受。
+
+```sh
+export OLLAMA_MODEL_NAME="qwen3:8b"
+```
+
+### `LLAMA_CPP_BASE_URL`
+
+覆盖 `llama_cpp` 供应商的 `base_url` 字段。
+
+```sh
+export LLAMA_CPP_BASE_URL="http://localhost:8080/v1"
+```
+
+### `LLAMA_CPP_API_KEY`
+
+覆盖 `llama_cpp` 供应商的 `api_key` 字段。
+
+```sh
+export LLAMA_CPP_API_KEY="secret"
+```
+
+### `LLAMA_CPP_MODEL_NAME`
+
+覆盖 `llama_cpp` 供应商的模型 `model` 字段。
+
+```sh
+export LLAMA_CPP_MODEL_NAME="qwen2.5-7b"
+```
+
 ## 其他环境变量
 
 | 环境变量 | 说明 |

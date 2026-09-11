@@ -104,7 +104,6 @@ async def _list_provider_model_ids(
         try:
             infos = await list_ollama_models(
                 provider.base_url,
-                api_key,
             )
         except Exception as exc:
             logger.debug(

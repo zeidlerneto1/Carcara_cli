@@ -33,6 +33,21 @@ class _OllamaStreamedMessage:
         return iterator()
 
 
+def _normalize_base_url(base_url: str) -> str:
+    """Return the Ollama native API root for a possibly OpenAI-compatible URL.
+
+    Ollama exposes its native API under ``/api`` (``/api/chat``, ``/api/tags``) and
+    an OpenAI-compatible endpoint under ``/v1``. Configuration may carry either
+    form (or a bare host), so we normalize to the native ``/api`` root.
+    """
+    root = base_url.rstrip("/")
+    if root.endswith("/v1"):
+        root = root[: -len("/v1")]
+    if root.endswith("/api"):
+        return root
+    return f"{root}/api"
+
+
 class OllamaProvider(ChatProvider):
     def __init__(
         self,
@@ -41,7 +56,7 @@ class OllamaProvider(ChatProvider):
         base_url: str = "http://localhost:11434/api",
     ) -> None:
         self.model = model
-        self.base_url = base_url.rstrip("/")
+        self.base_url = _normalize_base_url(base_url)
         self.name = "ollama"
         self._thinking = False
 

@@ -191,7 +191,10 @@ async def _ollama_tags(base_url: str) -> list[str]:
     if root.endswith("/v1"):
         root = root[:-3]
 
-    url = f"{root}/api/tags"
+    if not root.endswith("/api"):
+        root = f"{root}/api"
+
+    url = f"{root}/tags"
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
@@ -220,7 +223,7 @@ async def _configure_ollama(config: Config) -> None:
 
     base_url = await _ask(
         "Base URL",
-        existing.base_url if existing else "http://localhost:11434/v1",
+        existing.base_url if existing else "http://localhost:11434/api",
     )
 
     console.print()
@@ -277,13 +280,11 @@ async def _configure_ollama(config: Config) -> None:
         console.print("[red]Context size inválido.[/red]")
         return
 
-    # Ollama exposes an OpenAI-compatible endpoint.
-    #
-    # We intentionally use openai_legacy here instead of inventing
-    # another ProviderType. The current llm.py already supports this
-    # provider implementation.
+    # Ollama uses its native API (base_url http://localhost:11434/api).
+    # The native OllamaProvider (src/kimi_cli/ollama.py) supports tool calling
+    # and is what create_llm() builds for type="ollama".
     provider = LLMProvider(
-        type="openai_legacy",
+        type="ollama",
         base_url=base_url,
         api_key=SecretStr("ollama"),
     )

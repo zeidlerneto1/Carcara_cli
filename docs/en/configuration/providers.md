@@ -34,6 +34,8 @@ The `type` field in `providers` configuration specifies the API provider type. D
 | `anthropic` | Anthropic Claude API |
 | `gemini` | Google Gemini API |
 | `vertexai` | Google Vertex AI |
+| `ollama` | Ollama native API (local models) |
+| `llama_cpp` | llama.cpp server (OpenAI-compatible, local models) |
 
 All provider types support adding custom HTTP headers via the `custom_headers` field. See [Configuration files](./config-files.md) for details.
 
@@ -102,6 +104,55 @@ type = "vertexai"
 base_url = "https://xxx-aiplatform.googleapis.com"
 api_key = ""
 env = { GOOGLE_CLOUD_PROJECT = "your-project-id" }
+```
+
+### `ollama`
+
+For connecting to a local [Ollama](https://ollama.com) server. The `type` is `ollama` and uses
+Ollama's **native** API (`/api/chat`, `/api/tags`), which supports function/tool calling for
+models that advertise it (e.g. `qwen3`, `llama3.1+`, `mistral`, ...).
+
+The default `base_url` is `http://localhost:11434/api`. If you only know Ollama's OpenAI-compatible
+URL (`http://localhost:11434/v1`), you can still use it — the CLI normalizes it to `/api`
+automatically.
+
+```toml
+[providers.ollama]
+type = "ollama"
+base_url = "http://localhost:11434/api"
+api_key = ""
+```
+
+```toml
+[models.ollama/qwen3]
+provider = "ollama"
+model = "qwen3:8b"
+max_context_size = 32768
+```
+
+You can also configure Ollama interactively with the `/provider` slash command in shell mode, which
+auto-detects locally installed models.
+
+### `llama_cpp`
+
+For connecting to a local [llama.cpp](https://github.com/ggerganov/llama.cpp) server
+(`llama-server`), which exposes an **OpenAI-compatible** API. It uses the `OpenAILegacy` client
+under the hood, so function/tool calling works for models that support it.
+
+The default `base_url` is `http://localhost:8080/v1`.
+
+```toml
+[providers.llama_cpp]
+type = "llama_cpp"
+base_url = "http://localhost:8080/v1"
+api_key = ""
+```
+
+```toml
+[models.llama_cpp/model]
+provider = "llama_cpp"
+model = "your-model"
+max_context_size = 8192
 ```
 
 ## Model capabilities

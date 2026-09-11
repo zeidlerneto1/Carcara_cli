@@ -341,7 +341,7 @@ def get_carcara_default_config() -> Config:
             ),
             "ollama": LLMProvider(
                 type="ollama",
-                base_url="http://localhost:11434/v1",
+                base_url="http://localhost:11434/api",
                 api_key=SecretStr(""),
             ),
             "llama_cpp": LLMProvider(

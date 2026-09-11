@@ -55,6 +55,8 @@ Kimi Code CLI 的配置可以通过多种方式设置，不同来源的配置按
 
 - `kimi` 类型的供应商：使用 `KIMI_*` 环境变量
 - `openai_legacy` 或 `openai_responses` 类型的供应商：使用 `OPENAI_*` 环境变量
+- `ollama` 类型的供应商：使用 `OLLAMA_*` 环境变量
+- `llama_cpp` 类型的供应商：使用 `LLAMA_CPP_*` 环境变量
 - 其他类型的供应商：不支持环境变量覆盖
 
 完整的环境变量列表请参阅 [环境变量](./env-vars.md)。
