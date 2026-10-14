@@ -282,7 +282,7 @@ def kimi(
     ] = False,
     # Customization
     agent: Annotated[
-        Literal["default", "okabe", "jarvis"] | None,
+        Literal["default", "okabe", "jarvis", "reverser"] | None,
         typer.Option(
             "--agent",
             help="Builtin agent specification to use. Default: builtin default agent.",
@@ -379,7 +379,12 @@ def kimi(
 
     from kaos.path import KaosPath
 
-    from kimi_cli.agentspec import DEFAULT_AGENT_FILE, JARVIS_AGENT_FILE, OKABE_AGENT_FILE
+    from kimi_cli.agentspec import (
+        DEFAULT_AGENT_FILE,
+        JARVIS_AGENT_FILE,
+        OKABE_AGENT_FILE,
+        REVERSER_AGENT_FILE,
+    )
     from kimi_cli.app import KimiCLI, enable_logging
     from kimi_cli.config import Config, load_config_from_string
     from kimi_cli.exception import ConfigError
@@ -467,6 +472,8 @@ def kimi(
                 agent_file = OKABE_AGENT_FILE
             case "jarvis":
                 agent_file = JARVIS_AGENT_FILE
+            case "reverser":
+                agent_file = REVERSER_AGENT_FILE
 
     ui: UIMode = "shell"
     if print_mode:

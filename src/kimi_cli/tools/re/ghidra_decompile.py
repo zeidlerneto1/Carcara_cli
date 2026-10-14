@@ -31,6 +31,7 @@ class GhidraDecompile(CallableTool2[Params]):
         headless = _find_analyze_headless()
         if headless is None:
             raise SkipThisTool()
+        super().__init__()
         self._headless = headless
 
     @override

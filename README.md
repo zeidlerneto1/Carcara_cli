@@ -196,6 +196,7 @@ Você pode escolher um agente embutido na inicialização com a flag `--agent`:
 | `default` | Agente padrão, adequado para uso geral. |
 | `okabe` | Agente estendido do `default` que adiciona a tool `SendDMail` ao conjunto de ferramentas. |
 | `jarvis` | Assistente pessoal com system prompt próprio (persona ENI), herda todas as ferramentas do `default`. |
+| `reverser` | Agente de engenharia reversa (RE) de firmware embarcado, com toolset RE e persistência `rev/<target>.md`. |
 
 ```bash
 # Agente padrão (default)
@@ -206,6 +207,9 @@ uv run kimi --agent okabe -p "teste"
 
 # Agente jarvis (assistente pessoal)
 uv run kimi --agent jarvis -p "oi"
+
+# Agente reverser (engenharia reversa de firmware)
+uv run kimi --agent reverser -p "Analise o binário firmware.bin"
 ```
 
 ### Thinking mode

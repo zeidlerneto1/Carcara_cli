@@ -34,3 +34,6 @@ agent:
     plan:
       path: ./plan.yaml
       description: "Read-only implementation planning and architecture design."
+    reverser:
+      path: ../reverser/agent.yaml
+      description: "Reverse engineering of embedded firmware binaries (RE toolset + session persistence)."

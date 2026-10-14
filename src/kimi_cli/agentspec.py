@@ -20,6 +20,7 @@ def get_agents_dir() -> Path:
 DEFAULT_AGENT_FILE = get_agents_dir() / "default" / "agent.yaml"
 OKABE_AGENT_FILE = get_agents_dir() / "okabe" / "agent.yaml"
 JARVIS_AGENT_FILE = get_agents_dir() / "jarvis" / "agent.yaml"
+REVERSER_AGENT_FILE = get_agents_dir() / "reverser" / "agent.yaml"
 
 
 class Inherit(NamedTuple):
