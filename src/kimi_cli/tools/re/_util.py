@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import kaos
+from kaos import AsyncReadable
 
 from kimi_cli.utils.subprocess_env import get_noninteractive_env
 
@@ -12,8 +13,8 @@ async def run_command(*args: str, timeout: int = 120) -> tuple[int, str]:
 
     process.stdin.close()
 
-    async def _read_stream(stream):
-        lines = []
+    async def _read_stream(stream: AsyncReadable) -> bytes:
+        lines: list[bytes] = []
         while True:
             line = await stream.readline()
             if line:
