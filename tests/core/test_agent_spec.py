@@ -57,6 +57,10 @@ def test_load_default_agent_spec():
                 "Fast codebase exploration with prompt-enforced read-only behavior.",
             ),
             "plan": ("plan.yaml", "Read-only implementation planning and architecture design."),
+            "reverser": (
+                "../reverser/agent.yaml",
+                "Reverse engineering of embedded firmware binaries (RE toolset + session persistence).",
+            ),
         }
     )
 

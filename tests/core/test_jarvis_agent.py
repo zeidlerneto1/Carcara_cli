@@ -41,4 +41,4 @@ async def test_jarvis_agent_has_subagents(runtime: Runtime):
     from kimi_cli.agentspec import load_agent_spec
 
     spec = load_agent_spec(JARVIS_AGENT_FILE)
-    assert set(spec.subagents) == {"coder", "explore", "plan"}
+    assert set(spec.subagents) == {"coder", "explore", "plan", "reverser"}
